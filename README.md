@@ -73,8 +73,19 @@ Build/test:
 ```bash
 cargo fmt --all
 cargo test
+# lint (clippy, deny warnings)
+cargo lint
 # coverage (requires cargo-llvm-cov): 
 cargo llvm-cov --workspace --summary-only
+
+# one-shot local CI (fmt + clippy + test + coverage)
+# scripts:
+./scripts/ci-local.sh
+# or:
+pwsh ./scripts/ci-local.ps1
+# or cargo aliases:
+cargo ci-local            # bash
+cargo ci-local-pwsh       # PowerShell
 ```
 
 ### Crate overview

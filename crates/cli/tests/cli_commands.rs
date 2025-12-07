@@ -4,7 +4,6 @@ use std::fs;
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
-use serde_json;
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 

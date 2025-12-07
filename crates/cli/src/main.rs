@@ -1,12 +1,9 @@
-use std::env;
 use std::fs;
-use std::io::{BufReader, Read};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
+use binary_slicer::{canonicalize_or_current, infer_project_name, sha256_file};
 use clap::{Parser, Subcommand};
-use serde_json;
-use sha2::{Digest, Sha256};
 
 /// Slice-oriented reverse-engineering assistant CLI.
 ///
@@ -506,99 +503,8 @@ fn list_binaries_command(root: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Canonicalize the root path if possible, falling back to the given string
-/// relative to the current working directory.
-fn canonicalize_or_current(root: &str) -> Result<PathBuf> {
-    let path = Path::new(root);
-    if path == Path::new(".") {
-        Ok(env::current_dir().context("Failed to get current directory")?)
-    } else {
-        // Try to canonicalize; if it fails (e.g., path does not yet exist),
-        // join it with the current dir to get an absolute path.
-        match path.canonicalize() {
-            Ok(p) => Ok(p),
-            Err(_) => {
-                let cwd = env::current_dir().context("Failed to get current directory")?;
-                Ok(cwd.join(path))
-            }
-        }
-    }
-}
-
-/// Infer a project name from the root path.
-///
-/// If the root has no final component (e.g., `/`), fallback to `unnamed-project`.
-fn infer_project_name(root: &Path) -> String {
-    root.file_name().and_then(|os_str| os_str.to_str()).unwrap_or("unnamed-project").to_string()
-}
-
 /// Helper to print whether a directory exists.
 fn print_dir_status(label: &str, path: &Path) {
     let exists = path.is_dir();
     println!("- {label}: {} ({})", if exists { "OK" } else { "MISSING" }, path.display());
-}
-
-/// Compute the SHA-256 hash of a file and return it as a hex string.
-fn sha256_file(path: &Path) -> Result<String> {
-    let file = fs::File::open(path)
-        .with_context(|| format!("Failed to open binary for hashing: {}", path.display()))?;
-    let mut reader = BufReader::new(file);
-    let mut hasher = Sha256::new();
-    let mut buf = [0u8; 8192];
-
-    loop {
-        let n = reader
-            .read(&mut buf)
-            .with_context(|| format!("Failed to read binary for hashing: {}", path.display()))?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-
-    let digest = hasher.finalize();
-    Ok(format!("{:x}", digest))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn canonicalize_or_current_returns_cwd_for_dot() {
-        let original = env::current_dir().expect("cwd");
-        let tmp = tempdir().expect("tempdir");
-        env::set_current_dir(tmp.path()).expect("chdir tmp");
-
-        let result = canonicalize_or_current(".").expect("canonicalize");
-        assert_eq!(result, tmp.path());
-
-        env::set_current_dir(original).expect("restore cwd");
-    }
-
-    #[test]
-    fn canonicalize_or_current_resolves_existing_relative_path() {
-        let original = env::current_dir().expect("cwd");
-        let tmp = tempdir().expect("tempdir");
-        let subdir = tmp.path().join("nested");
-        fs::create_dir_all(&subdir).expect("create nested");
-        env::set_current_dir(tmp.path()).expect("chdir tmp");
-
-        let result = canonicalize_or_current("nested").expect("canonicalize nested");
-        assert_eq!(result, subdir.canonicalize().expect("canonicalize subdir"));
-
-        env::set_current_dir(original).expect("restore cwd");
-    }
-
-    #[test]
-    fn infer_project_name_uses_last_path_component() {
-        assert_eq!(infer_project_name(Path::new("C:/work/binary-slicer")), "binary-slicer");
-        assert_eq!(infer_project_name(Path::new("/tmp/project-root")), "project-root");
-    }
-
-    #[test]
-    fn infer_project_name_falls_back_when_missing() {
-        assert_eq!(infer_project_name(Path::new("/")), "unnamed-project");
-    }
 }
