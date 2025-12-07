@@ -73,6 +73,23 @@ enum Command {
         #[arg(long)]
         name: Option<String>,
     },
+
+    /// Initialize a new slice and scaffold its documentation.
+    ///
+    /// This creates `docs/slices/<Name>.md` under the project root.
+    InitSlice {
+        /// Project root directory. Defaults to the current working directory.
+        #[arg(long, default_value = ".")]
+        root: String,
+
+        /// Name of the slice (e.g., AutoUpdateManager, CUIManager).
+        #[arg(long)]
+        name: String,
+
+        /// Optional human-readable description of the slice.
+        #[arg(long)]
+        description: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -84,6 +101,9 @@ fn main() -> Result<()> {
         Command::InitProject { root, name } => init_project_command(&root, name)?,
         Command::ProjectInfo { root } => project_info_command(&root)?,
         Command::AddBinary { root, path, name } => add_binary_command(&root, &path, name)?,
+        Command::InitSlice { root, name, description } => {
+            init_slice_command(&root, &name, description)?
+        }
     }
 
     Ok(())
@@ -245,6 +265,64 @@ fn add_binary_command(root: &str, path: &str, name: Option<String>) -> Result<()
     println!("  Name: {}", record.name);
     println!("  Path (relative): {}", record.path);
     println!("  DB: {}", db_path.display());
+
+    Ok(())
+}
+
+/// Initialize a new slice and scaffold its documentation under docs/slices.
+///
+/// This does *not* yet register the slice in the DB; that will come in a later step.
+/// For now, it validates the project root and creates a Markdown stub.
+fn init_slice_command(root: &str, name: &str, description: Option<String>) -> Result<()> {
+    let root_path = canonicalize_or_current(root)?;
+    let layout = ritual_core::db::ProjectLayout::new(&root_path);
+
+    // Ensure this is a Ritual project by checking for project config.
+    if !layout.project_config_path.exists() {
+        return Err(anyhow!(
+            "No Ritual project config found at {} (expected {})",
+            root_path.display(),
+            layout.project_config_path.display()
+        ));
+    }
+
+    // Ensure docs/slices directory exists.
+    fs::create_dir_all(&layout.slices_docs_dir).with_context(|| {
+        format!("Failed to create slices docs directory: {}", layout.slices_docs_dir.display())
+    })?;
+
+    // Compute slice doc path.
+    let file_name = format!("{name}.md");
+    let doc_path = layout.slices_docs_dir.join(&file_name);
+
+    if doc_path.exists() {
+        return Err(anyhow!("Slice doc already exists: {}", doc_path.display()));
+    }
+
+    let description_line = description.unwrap_or_else(|| "TODO: describe this slice.".to_string());
+
+    let contents = format!(
+        "# Slice: {name}\n\n\
+         {description_line}\n\n\
+         ## Roots\n\n\
+         - TODO: list known root functions (addresses, names, string refs).\n\n\
+         ## Purpose\n\n\
+         - TODO: high-level purpose of this subsystem.\n\n\
+         ## Key Functions\n\n\
+         - TODO: generated from analysis.\n\n\
+         ## External Dependencies\n\n\
+         - TODO: calls into other slices or libraries.\n\n\
+         ## Evidence Index\n\n\
+         - TODO: map claims above to concrete addresses/xrefs.\n"
+    );
+
+    fs::write(&doc_path, contents)
+        .with_context(|| format!("Failed to write slice doc at {}", doc_path.display()))?;
+
+    println!("Initialized slice:");
+    println!("  Name: {name}");
+    println!("  Root: {}", root_path.display());
+    println!("  Doc:  {}", doc_path.display());
 
     Ok(())
 }
