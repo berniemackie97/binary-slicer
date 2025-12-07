@@ -112,7 +112,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cov-
 
-      - name: Coverage (core >= 88%)
+      - name: Coverage (core >= 80%)
         run: cargo llvm-cov --package ritual-core --fail-under-lines 88
 
       - name: Coverage (workspace >= 75%)
