@@ -83,10 +83,11 @@ jobs:
         run: cargo test --workspace --all-targets --locked --message-format json > test-output.json
 
       - name: Convert test report to JUnit
+        shell: bash
         run: |
           if ! cargo2junit < test-output.json > junit.xml; then
-            echo "::warning::cargo2junit found no test suites; writing empty report";
-            echo '<testsuites/>' > junit.xml;
+            echo "::warning::cargo2junit found no test suites; writing empty report"
+            echo '<testsuites/>' > junit.xml
           fi
 
       - name: Upload test report (JUnit)
