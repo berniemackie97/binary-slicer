@@ -78,7 +78,10 @@ cargo test
 # lint (clippy, deny warnings)
 cargo lint
 # coverage (requires cargo-llvm-cov): 
-cargo llvm-cov --workspace --summary-only
+# - core gate: lines >=85%, functions >=80%, branches >=75%
+# - workspace gate: lines >=80%, functions >=75%, branches >=70%
+cargo llvm-cov --package ritual-core --fail-under-lines 85 --fail-under-functions 80 --fail-under-branches 75
+cargo llvm-cov --workspace --summary-only --fail-under-lines 80 --fail-under-functions 75 --fail-under-branches 70
 
 # one-shot local CI (fmt + clippy + test + coverage)
 # scripts:
