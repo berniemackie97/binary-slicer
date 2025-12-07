@@ -1,0 +1,26 @@
+[workspace]
+members = [
+    "crates/core",
+    "crates/cli",
+]
+
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+authors = ["Your Name <you@example.com>"]
+license = "MIT OR Apache-2.0"
+repository = ""
+description = "Slice-oriented reverse-engineering assistant for native game/engine binaries."
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3.10"
+assert_cmd = "2"
+

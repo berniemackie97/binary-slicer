@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+/.idea
+/.vscode
+/.DS_Store
+
+# Ritual project metadata
+/.ritual/project.db
+

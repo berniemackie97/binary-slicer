@@ -1,0 +1,17 @@
+[package]
+name = "ritual-core"
+edition = "2021"
+version = "0.1.0"
+description = "Core library for slice-oriented reverse-engineering of native binaries."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+

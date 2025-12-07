@@ -1,0 +1,18 @@
+[package]
+name = "ritual-cli"
+edition = "2021"
+version = "0.1.0"
+description = "CLI frontend for ritual-core."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+ritual-core = { path = "../core" }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+tempfile = { workspace = true }
+

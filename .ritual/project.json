@@ -1,0 +1,8 @@
+{
+  "name": "CQ2ClientLib",
+  "description": null,
+  "config_version": "0.1.0",
+  "db": {
+    "path": ".ritual\\project.db"
+  }
+}
