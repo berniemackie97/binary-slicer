@@ -30,6 +30,15 @@ fn hello_named_slice_command_runs_successfully() {
         .stdout(predicate::str::contains("Hello, slice: AutoUpdateManager"));
 }
 
+/// Running with no args should default to Hello command.
+#[test]
+fn default_command_runs_hello() {
+    cargo_bin_cmd!("binary-slicer")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello, slice: DefaultSlice"));
+}
+
 /// `init-project` should work when we omit `--root` and just rely on `.`
 /// (using the current working directory).
 #[test]
