@@ -16,7 +16,7 @@ fn project_db_open_errors_on_unsupported_schema_version() {
     // Manually create a DB and set user_version higher than we support.
     {
         let conn = Connection::open(&layout.db_path).expect("open raw sqlite db");
-        conn.pragma_update(None, "user_version", &99_i32).expect("set user_version pragma");
+        conn.pragma_update(None, "user_version", 99_i32).expect("set user_version pragma");
     }
 
     // Act: attempt to open via ProjectDb::open.
