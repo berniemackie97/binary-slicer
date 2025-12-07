@@ -2,10 +2,14 @@ use std::fs;
 use std::path::Path;
 
 use binary_slicer::{canonicalize_or_current, infer_project_name};
+use std::sync::Mutex;
 use tempfile::tempdir;
+
+static CWD_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn canonicalize_or_current_returns_cwd_for_dot() {
+    let _guard = CWD_LOCK.lock().unwrap();
     let original = std::env::current_dir().expect("cwd");
     let tmp = tempdir().expect("tempdir");
     std::env::set_current_dir(tmp.path()).expect("chdir tmp");
@@ -19,6 +23,7 @@ fn canonicalize_or_current_returns_cwd_for_dot() {
 
 #[test]
 fn canonicalize_or_current_resolves_existing_relative_path() {
+    let _guard = CWD_LOCK.lock().unwrap();
     let original = std::env::current_dir().expect("cwd");
     let tmp = tempdir().expect("tempdir");
     let subdir = tmp.path().join("nested");
