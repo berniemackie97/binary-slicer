@@ -10,8 +10,9 @@ fn canonicalize_or_current_returns_cwd_for_dot() {
     let tmp = tempdir().expect("tempdir");
     std::env::set_current_dir(tmp.path()).expect("chdir tmp");
 
-    let result = canonicalize_or_current(".").expect("canonicalize");
-    assert_eq!(result, tmp.path());
+    let result = canonicalize_or_current(".").expect("canonicalize").canonicalize().expect("canon");
+    let expected = tmp.path().canonicalize().expect("canon tmp");
+    assert_eq!(result, expected);
 
     std::env::set_current_dir(original).expect("restore cwd");
 }
