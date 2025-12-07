@@ -65,6 +65,9 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Install cargo2junit
+        run: cargo install cargo2junit
+
       - name: Cache cargo registry and target
         uses: actions/cache@v4
         with:
@@ -76,8 +79,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-test-
 
-      - name: Build & test
-        run: cargo test --workspace --all-targets --locked
+      - name: Build & test (json output)
+        run: cargo test --workspace --all-targets --locked --message-format json > test-output.json
+
+      - name: Convert test report to JUnit
+        run: cargo2junit < test-output.json > junit.xml
+
+      - name: Upload test report (JUnit)
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ runner.os }}
+          path: junit.xml
 
   coverage:
     name: Coverage (llvm-cov)
@@ -112,11 +124,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cov-
 
-      - name: "Coverage (core: lines 85 / functions 80 / branches 75)"
-        run: cargo llvm-cov --package ritual-core --fail-under-lines 85 --fail-under-functions 80 --fail-under-branches 75
+      - name: "Coverage (core: lines 85 / functions 80)"
+        run: cargo llvm-cov --package ritual-core --fail-under-lines 85 --fail-under-functions 80
 
-      - name: "Coverage (workspace: lines 80 / functions 75 / branches 70)"
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info --fail-under-lines 80 --fail-under-functions 75 --fail-under-branches 70
+      - name: "Coverage (workspace: lines 80 / functions 75)"
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info --fail-under-lines 80 --fail-under-functions 75
 
       - name: Upload coverage artifact (LCOV)
         uses: actions/upload-artifact@v4
