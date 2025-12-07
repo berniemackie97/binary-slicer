@@ -79,9 +79,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Default to the Hello command if none is provided.
-    match cli.command.unwrap_or(Command::Hello {
-        slice: "DefaultSlice".to_string(),
-    }) {
+    match cli.command.unwrap_or(Command::Hello { slice: "DefaultSlice".to_string() }) {
         Command::Hello { slice } => hello_command(&slice)?,
         Command::InitProject { root, name } => init_project_command(&root, name)?,
         Command::ProjectInfo { root } => project_info_command(&root)?,
@@ -122,23 +120,13 @@ fn init_project_command(root: &str, name: Option<String>) -> Result<()> {
     fs::create_dir_all(&layout.meta_dir)
         .with_context(|| format!("Failed to create meta dir: {}", layout.meta_dir.display()))?;
     fs::create_dir_all(&layout.slices_docs_dir).with_context(|| {
-        format!(
-            "Failed to create slices docs dir: {}",
-            layout.slices_docs_dir.display()
-        )
+        format!("Failed to create slices docs dir: {}", layout.slices_docs_dir.display())
     })?;
     fs::create_dir_all(&layout.reports_dir).with_context(|| {
-        format!(
-            "Failed to create reports dir: {}",
-            layout.reports_dir.display()
-        )
+        format!("Failed to create reports dir: {}", layout.reports_dir.display())
     })?;
-    fs::create_dir_all(&layout.graphs_dir).with_context(|| {
-        format!(
-            "Failed to create graphs dir: {}",
-            layout.graphs_dir.display()
-        )
-    })?;
+    fs::create_dir_all(&layout.graphs_dir)
+        .with_context(|| format!("Failed to create graphs dir: {}", layout.graphs_dir.display()))?;
 
     // Build project config.
     let db_path_rel = layout.db_path_relative_string();
@@ -147,10 +135,7 @@ fn init_project_command(root: &str, name: Option<String>) -> Result<()> {
     // Serialize and write config JSON.
     let json = serde_json::to_string_pretty(&config)?;
     fs::write(&layout.project_config_path, json).with_context(|| {
-        format!(
-            "Failed to write project config: {}",
-            layout.project_config_path.display()
-        )
+        format!("Failed to write project config: {}", layout.project_config_path.display())
     })?;
 
     println!("Initialized Ritual Slicer project:");
@@ -173,10 +158,7 @@ fn project_info_command(root: &str) -> Result<()> {
 
     // Read the project config.
     let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
-        format!(
-            "Failed to read project config at {}",
-            layout.project_config_path.display()
-        )
+        format!("Failed to read project config at {}", layout.project_config_path.display())
     })?;
 
     let config: ritual_core::db::ProjectConfig =
@@ -209,10 +191,7 @@ fn add_binary_command(root: &str, path: &str, name: Option<String>) -> Result<()
 
     // Load project config so we know where the DB lives.
     let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
-        format!(
-            "Failed to read project config at {}",
-            layout.project_config_path.display()
-        )
+        format!("Failed to read project config at {}", layout.project_config_path.display())
     })?;
 
     let config: ritual_core::db::ProjectConfig =
@@ -226,12 +205,8 @@ fn add_binary_command(root: &str, path: &str, name: Option<String>) -> Result<()
         layout.root.join(config_db_path)
     };
 
-    let db = ritual_core::db::ProjectDb::open(&db_path).with_context(|| {
-        format!(
-            "Failed to open project database at {}",
-            db_path.display()
-        )
-    })?;
+    let db = ritual_core::db::ProjectDb::open(&db_path)
+        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
 
     // Normalize the binary path.
     let input_path = Path::new(path);
@@ -242,10 +217,7 @@ fn add_binary_command(root: &str, path: &str, name: Option<String>) -> Result<()
     };
 
     if !abs_path.exists() {
-        return Err(anyhow!(
-            "Binary file does not exist: {}",
-            abs_path.display()
-        ));
+        return Err(anyhow!("Binary file does not exist: {}", abs_path.display()));
     }
 
     // Store path relative to project root when possible.
@@ -256,11 +228,7 @@ fn add_binary_command(root: &str, path: &str, name: Option<String>) -> Result<()
     let rel_path_str = rel_path.to_string_lossy().to_string();
 
     let binary_name = name.unwrap_or_else(|| {
-        input_path
-            .file_name()
-            .and_then(|os| os.to_str())
-            .unwrap_or(path)
-            .to_string()
+        input_path.file_name().and_then(|os| os.to_str()).unwrap_or(path).to_string()
     });
 
     let record = ritual_core::db::BinaryRecord {
@@ -270,9 +238,7 @@ fn add_binary_command(root: &str, path: &str, name: Option<String>) -> Result<()
         hash: None,
     };
 
-    let id = db
-        .insert_binary(&record)
-        .context("Failed to insert binary record")?;
+    let id = db.insert_binary(&record).context("Failed to insert binary record")?;
 
     println!("Added binary:");
     println!("  Id: {}", id);
@@ -306,19 +272,11 @@ fn canonicalize_or_current(root: &str) -> Result<PathBuf> {
 ///
 /// If the root has no final component (e.g., `/`), fallback to `unnamed-project`.
 fn infer_project_name(root: &Path) -> String {
-    root.file_name()
-        .and_then(|os_str| os_str.to_str())
-        .unwrap_or("unnamed-project")
-        .to_string()
+    root.file_name().and_then(|os_str| os_str.to_str()).unwrap_or("unnamed-project").to_string()
 }
 
 /// Helper to print whether a directory exists.
 fn print_dir_status(label: &str, path: &Path) {
     let exists = path.is_dir();
-    println!(
-        "- {label}: {} ({})",
-        if exists { "OK" } else { "MISSING" },
-        path.display()
-    );
+    println!("- {label}: {} ({})", if exists { "OK" } else { "MISSING" }, path.display());
 }
-

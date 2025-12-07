@@ -33,4 +33,3 @@ impl Function {
         Self { name: name.into() }
     }
 }
-

@@ -7,19 +7,10 @@ fn project_layout_uses_expected_paths() {
 
     assert_eq!(layout.root, PathBuf::from("/my/project"));
     assert_eq!(layout.meta_dir, PathBuf::from("/my/project/.ritual"));
-    assert_eq!(
-        layout.project_config_path,
-        PathBuf::from("/my/project/.ritual/project.json")
-    );
-    assert_eq!(
-        layout.db_path,
-        PathBuf::from("/my/project/.ritual/project.db")
-    );
+    assert_eq!(layout.project_config_path, PathBuf::from("/my/project/.ritual/project.json"));
+    assert_eq!(layout.db_path, PathBuf::from("/my/project/.ritual/project.db"));
     assert_eq!(layout.docs_dir, PathBuf::from("/my/project/docs"));
-    assert_eq!(
-        layout.slices_docs_dir,
-        PathBuf::from("/my/project/docs/slices")
-    );
+    assert_eq!(layout.slices_docs_dir, PathBuf::from("/my/project/docs/slices"));
     assert_eq!(layout.reports_dir, PathBuf::from("/my/project/reports"));
     assert_eq!(layout.graphs_dir, PathBuf::from("/my/project/graphs"));
 

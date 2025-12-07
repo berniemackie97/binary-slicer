@@ -185,12 +185,7 @@ pub struct BinaryRecord {
 
 impl BinaryRecord {
     pub fn new(name: impl Into<String>, path: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            path: path.into(),
-            arch: None,
-            hash: None,
-        }
+        Self { name: name.into(), path: path.into(), arch: None, hash: None }
     }
 }
 
@@ -210,11 +205,7 @@ pub struct SliceRecord {
 
 impl SliceRecord {
     pub fn new(name: impl Into<String>, status: SliceStatus) -> Self {
-        Self {
-            name: name.into(),
-            description: None,
-            status,
-        }
+        Self { name: name.into(), description: None, status }
     }
 }
 
@@ -297,11 +288,7 @@ impl ProjectDb {
             INSERT INTO slices (name, description, status)
             VALUES (?1, ?2, ?3)
             "#,
-            params![
-                record.name,
-                record.description,
-                record.status.to_i32(),
-            ],
+            params![record.name, record.description, record.status.to_i32(),],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -379,4 +366,3 @@ fn current_schema_version(conn: &Connection) -> DbResult<i32> {
     let version: i32 = conn.query_row("PRAGMA user_version;", [], |row| row.get(0))?;
     Ok(version)
 }
-

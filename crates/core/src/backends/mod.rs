@@ -15,4 +15,3 @@ pub trait DisassemblyBackend: Send + Sync {
     /// Returns a human-readable name for the backend.
     fn name(&self) -> &str;
 }
-

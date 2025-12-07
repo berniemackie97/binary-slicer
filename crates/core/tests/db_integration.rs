@@ -12,9 +12,8 @@ fn project_db_initializes_and_handles_binaries_and_slices() {
         let conn = db.connection();
 
         // Check that user_version is set to 1.
-        let version: i32 = conn
-            .query_row("PRAGMA user_version;", [], |row| row.get(0))
-            .expect("schema version");
+        let version: i32 =
+            conn.query_row("PRAGMA user_version;", [], |row| row.get(0)).expect("schema version");
         assert_eq!(version, 1);
 
         // Insert a binary.
@@ -43,9 +42,8 @@ fn project_db_initializes_and_handles_binaries_and_slices() {
         let db = ProjectDb::open(&db_path).expect("re-open db");
         let conn = db.connection();
 
-        let version: i32 = conn
-            .query_row("PRAGMA user_version;", [], |row| row.get(0))
-            .expect("schema version");
+        let version: i32 =
+            conn.query_row("PRAGMA user_version;", [], |row| row.get(0)).expect("schema version");
         assert_eq!(version, 1);
 
         let binaries = db.list_binaries().expect("list binaries");

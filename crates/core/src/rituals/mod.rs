@@ -10,4 +10,3 @@
 pub struct RitualId {
     pub name: String,
 }
-

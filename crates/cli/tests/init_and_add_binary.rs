@@ -20,12 +20,7 @@ fn init_project_and_add_binary_registers_in_db() {
         .success();
 
     // 2. Run project-info just to ensure it works and sees the project.
-    cargo_bin_cmd!("ritual-cli")
-        .arg("project-info")
-        .arg("--root")
-        .arg(root)
-        .assert()
-        .success();
+    cargo_bin_cmd!("ritual-cli").arg("project-info").arg("--root").arg(root).assert().success();
 
     // 3. Create a dummy binary file under the project root.
     let bin_path = root.join("libCQ2Client.so");
@@ -56,4 +51,3 @@ fn init_project_and_add_binary_registers_in_db() {
         binaries[0].path
     );
 }
-

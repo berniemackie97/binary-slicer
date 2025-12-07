@@ -8,11 +8,11 @@
 //! The goal is to keep all substantive logic here so it is fully testable and
 //! reusable from multiple frontends (CLI, Python bindings, etc.).
 
-pub mod model;
 pub mod analysis;
-pub mod rituals;
-pub mod db;
 pub mod backends;
+pub mod db;
+pub mod model;
+pub mod rituals;
 
 /// Returns the library version as encoded at compile time.
 ///
@@ -20,4 +20,3 @@ pub mod backends;
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
-

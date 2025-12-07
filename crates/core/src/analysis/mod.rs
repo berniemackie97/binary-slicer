@@ -26,11 +26,8 @@ impl SliceAnalysisResult {
 ///
 /// In the future, this will be driven by the ritual DSL and real binaries.
 pub fn hello_slice(slice_name: &str) -> SliceAnalysisResult {
-    let slice = SliceId {
-        name: slice_name.to_string(),
-    };
+    let slice = SliceId { name: slice_name.to_string() };
     let functions = vec![Function::new("root_function_stub")];
 
     SliceAnalysisResult::new(slice, functions)
 }
-
