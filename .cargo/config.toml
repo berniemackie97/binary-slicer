@@ -1,0 +1,5 @@
+﻿[alias]
+fmt-check = "fmt --all -- --check"
+lint = "clippy --workspace --all-targets -- -D warnings"
+ci = "test --workspace --all-targets --locked"
+coverage = "llvm-cov --workspace --fail-under-lines 90"

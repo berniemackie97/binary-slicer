@@ -1,8 +1,5 @@
 [workspace]
-members = [
-    "crates/core",
-    "crates/cli",
-]
+members = ["crates/core", "crates/cli"]
 
 resolver = "2"
 
@@ -23,4 +20,3 @@ clap = { version = "4", features = ["derive"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tempfile = "3.10"
 assert_cmd = "2"
-
