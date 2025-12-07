@@ -113,6 +113,8 @@ pub struct ProjectLayout {
     pub reports_dir: PathBuf,
     /// Directory for graph artifacts (graphs).
     pub graphs_dir: PathBuf,
+    /// Directory for ritual specs/pipelines.
+    pub rituals_dir: PathBuf,
 }
 
 impl ProjectLayout {
@@ -128,6 +130,7 @@ impl ProjectLayout {
         let slices_docs_dir = docs_dir.join("slices");
         let reports_dir = root.join("reports");
         let graphs_dir = root.join("graphs");
+        let rituals_dir = root.join("rituals");
 
         Self {
             root,
@@ -138,6 +141,7 @@ impl ProjectLayout {
             slices_docs_dir,
             reports_dir,
             graphs_dir,
+            rituals_dir,
         }
     }
 

@@ -13,6 +13,7 @@ fn project_layout_uses_expected_paths() {
     assert_eq!(layout.slices_docs_dir, PathBuf::from("/my/project/docs/slices"));
     assert_eq!(layout.reports_dir, PathBuf::from("/my/project/reports"));
     assert_eq!(layout.graphs_dir, PathBuf::from("/my/project/graphs"));
+    assert_eq!(layout.rituals_dir, PathBuf::from("/my/project/rituals"));
 
     // Relative string should drop the root prefix when possible.
     let expected_rel = format!(".ritual{}project.db", MAIN_SEPARATOR);

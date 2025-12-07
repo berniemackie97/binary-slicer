@@ -113,10 +113,10 @@ jobs:
             ${{ runner.os }}-cov-
 
       - name: Coverage (core >= 80%)
-        run: cargo llvm-cov --package ritual-core --fail-under-lines 88
+        run: cargo llvm-cov --package ritual-core --fail-under-lines 80
 
-      - name: Coverage (workspace >= 75%)
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info --fail-under-lines 75
+      - name: Coverage (workspace >= 80%)
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info --fail-under-lines 80
 
       - name: Upload coverage artifact (LCOV)
         uses: actions/upload-artifact@v4

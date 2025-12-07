@@ -1,5 +1,7 @@
 # Binary Slicer (Slice-Oriented Reverse-Engineering Assistant)
 
+[![CI](https://github.com/berniemackie97/binary-slicer/actions/workflows/ci.yml/badge.svg)](https://github.com/berniemackie97/binary-slicer/actions/workflows/ci.yml)
+
 Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of native game/engine binaries (starting with `libCQ2Client.so`). It helps you carve a large binary into **subsystems ("slices")** with explicit evidence and repeatable workflows.
 
 > No vibes, only receipts. Slice-first, evidence-first.

@@ -4,6 +4,7 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Result};
 use binary_slicer::{canonicalize_or_current, infer_project_name, sha256_file};
 use clap::{Parser, Subcommand};
+use serde::Serialize;
 
 /// Slice-oriented reverse-engineering assistant CLI.
 ///
@@ -54,6 +55,10 @@ enum Command {
         /// Project root directory. Defaults to the current working directory.
         #[arg(long, default_value = ".")]
         root: String,
+
+        /// Emit JSON instead of human-readable text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
 
     /// Register a binary (e.g., libCQ2Client.so) in the project database.
@@ -130,6 +135,20 @@ enum Command {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+
+    /// Regenerate slice docs for all slices registered in the project DB.
+    EmitSliceDocs {
+        /// Project root directory. Defaults to the current working directory.
+        #[arg(long, default_value = ".")]
+        root: String,
+    },
+
+    /// Regenerate slice JSON reports for all slices registered in the project DB.
+    EmitSliceReports {
+        /// Project root directory. Defaults to the current working directory.
+        #[arg(long, default_value = ".")]
+        root: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -139,7 +158,7 @@ fn main() -> Result<()> {
     match cli.command.unwrap_or(Command::Hello { slice: "DefaultSlice".to_string() }) {
         Command::Hello { slice } => hello_command(&slice)?,
         Command::InitProject { root, name } => init_project_command(&root, name)?,
-        Command::ProjectInfo { root } => project_info_command(&root)?,
+        Command::ProjectInfo { root, json } => project_info_command(&root, json)?,
         Command::AddBinary { root, path, name, arch, hash, skip_hash } => {
             add_binary_command(&root, &path, name, arch, hash, skip_hash)?
         }
@@ -148,6 +167,8 @@ fn main() -> Result<()> {
         }
         Command::ListSlices { root, json } => list_slices_command(&root, json)?,
         Command::ListBinaries { root, json } => list_binaries_command(&root, json)?,
+        Command::EmitSliceDocs { root } => emit_slice_docs_command(&root)?,
+        Command::EmitSliceReports { root } => emit_slice_reports_command(&root)?,
     }
 
     Ok(())
@@ -191,6 +212,9 @@ fn init_project_command(root: &str, name: Option<String>) -> Result<()> {
     })?;
     fs::create_dir_all(&layout.graphs_dir)
         .with_context(|| format!("Failed to create graphs dir: {}", layout.graphs_dir.display()))?;
+    fs::create_dir_all(&layout.rituals_dir).with_context(|| {
+        format!("Failed to create rituals dir: {}", layout.rituals_dir.display())
+    })?;
 
     // Build project config.
     let db_path_rel = layout.db_path_relative_string();
@@ -221,8 +245,30 @@ fn init_project_command(root: &str, name: Option<String>) -> Result<()> {
     Ok(())
 }
 
+#[derive(Serialize)]
+struct ProjectInfoSnapshot {
+    name: String,
+    root: String,
+    config_file: String,
+    config_version: String,
+    db_path: String,
+    layout: ProjectInfoLayout,
+    binaries: Vec<ritual_core::db::BinaryRecord>,
+    slices: Vec<ritual_core::db::SliceRecord>,
+}
+
+#[derive(Serialize)]
+struct ProjectInfoLayout {
+    meta_dir: String,
+    docs_dir: String,
+    slices_docs_dir: String,
+    reports_dir: String,
+    graphs_dir: String,
+    rituals_dir: String,
+}
+
 /// Show basic information about an existing project.
-fn project_info_command(root: &str) -> Result<()> {
+fn project_info_command(root: &str, json: bool) -> Result<()> {
     let root_path = canonicalize_or_current(root)?;
     let layout = ritual_core::db::ProjectLayout::new(&root_path);
 
@@ -233,6 +279,43 @@ fn project_info_command(root: &str) -> Result<()> {
 
     let config: ritual_core::db::ProjectConfig =
         serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
+
+    // Resolve DB path (may be relative or absolute in config).
+    let config_db_path = Path::new(&config.db.path);
+    let db_path = if config_db_path.is_absolute() {
+        config_db_path.to_path_buf()
+    } else {
+        layout.root.join(config_db_path)
+    };
+
+    // Load DB metadata.
+    let db = ritual_core::db::ProjectDb::open(&db_path)
+        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+    let binaries = db.list_binaries().context("Failed to list binaries")?;
+    let slices = db.list_slices().context("Failed to list slices")?;
+
+    if json {
+        let snapshot = ProjectInfoSnapshot {
+            name: config.name.clone(),
+            root: layout.root.display().to_string(),
+            config_file: layout.project_config_path.display().to_string(),
+            config_version: config.config_version.clone(),
+            db_path: config.db.path.clone(),
+            layout: ProjectInfoLayout {
+                meta_dir: layout.meta_dir.display().to_string(),
+                docs_dir: layout.docs_dir.display().to_string(),
+                slices_docs_dir: layout.slices_docs_dir.display().to_string(),
+                reports_dir: layout.reports_dir.display().to_string(),
+                graphs_dir: layout.graphs_dir.display().to_string(),
+                rituals_dir: layout.rituals_dir.display().to_string(),
+            },
+            binaries,
+            slices,
+        };
+        let serialized = serde_json::to_string_pretty(&snapshot)?;
+        println!("{}", serialized);
+        return Ok(());
+    }
 
     println!("Binary Slicer Project Info");
     println!("==========================");
@@ -250,6 +333,7 @@ fn project_info_command(root: &str) -> Result<()> {
     print_dir_status("Slices docs dir", &layout.slices_docs_dir);
     print_dir_status("Reports dir", &layout.reports_dir);
     print_dir_status("Graphs dir", &layout.graphs_dir);
+    print_dir_status("Rituals dir", &layout.rituals_dir);
 
     Ok(())
 }
@@ -498,6 +582,120 @@ fn list_binaries_command(root: &str, json: bool) -> Result<()> {
                 bin.name, arch_display, bin.path, hash_display
             );
         }
+    }
+
+    Ok(())
+}
+
+/// Regenerate slice docs for all slices in the DB.
+fn emit_slice_docs_command(root: &str) -> Result<()> {
+    use ritual_core::db::{ProjectConfig, ProjectDb, ProjectLayout};
+
+    let root_path = canonicalize_or_current(root)?;
+    let layout = ProjectLayout::new(&root_path);
+
+    // Load project config.
+    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
+        format!("Failed to read project config at {}", layout.project_config_path.display())
+    })?;
+    let config: ProjectConfig =
+        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
+
+    // Resolve DB path (may be relative or absolute in config).
+    let config_db_path = Path::new(&config.db.path);
+    let db_path = if config_db_path.is_absolute() {
+        config_db_path.to_path_buf()
+    } else {
+        layout.root.join(config_db_path)
+    };
+
+    fs::create_dir_all(&layout.slices_docs_dir).with_context(|| {
+        format!("Failed to ensure slices docs dir {}", layout.slices_docs_dir.display())
+    })?;
+
+    let db = ProjectDb::open(&db_path)
+        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+
+    let slices = db.list_slices().context("Failed to list slices")?;
+    if slices.is_empty() {
+        println!("No slices to emit docs for.");
+        return Ok(());
+    }
+
+    for slice in slices {
+        let doc_path = layout.slices_docs_dir.join(format!("{}.md", slice.name));
+        let mut contents = String::new();
+        contents.push_str(&format!("# {}\n\n", slice.name));
+        if let Some(desc) = &slice.description {
+            contents.push_str(desc);
+            contents.push_str("\n\n");
+        } else {
+            contents.push_str("TODO: add a human-readable description of this slice.\n\n");
+        }
+        contents.push_str(
+            "## Roots\n- TODO: list root functions (by address/name) that define this slice.\n\n",
+        );
+        contents.push_str("## Functions\n- TODO: populated by analysis runs.\n\n");
+        contents.push_str("## Evidence\n- TODO: xrefs, strings, patterns that justify membership in this slice.\n");
+
+        fs::write(&doc_path, contents)
+            .with_context(|| format!("Failed to write slice doc at {}", doc_path.display()))?;
+        println!("Emitted slice doc: {}", doc_path.display());
+    }
+
+    Ok(())
+}
+
+/// Regenerate slice reports for all slices in the DB.
+fn emit_slice_reports_command(root: &str) -> Result<()> {
+    use ritual_core::db::{ProjectConfig, ProjectDb, ProjectLayout};
+
+    let root_path = canonicalize_or_current(root)?;
+    let layout = ProjectLayout::new(&root_path);
+
+    // Load project config.
+    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
+        format!("Failed to read project config at {}", layout.project_config_path.display())
+    })?;
+    let config: ProjectConfig =
+        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
+
+    // Resolve DB path (may be relative or absolute in config).
+    let config_db_path = Path::new(&config.db.path);
+    let db_path = if config_db_path.is_absolute() {
+        config_db_path.to_path_buf()
+    } else {
+        layout.root.join(config_db_path)
+    };
+
+    fs::create_dir_all(&layout.reports_dir).with_context(|| {
+        format!("Failed to ensure reports dir {}", layout.reports_dir.display())
+    })?;
+
+    let db = ProjectDb::open(&db_path)
+        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+
+    let slices = db.list_slices().context("Failed to list slices")?;
+    if slices.is_empty() {
+        println!("No slices to emit reports for.");
+        return Ok(());
+    }
+
+    for slice in slices {
+        let report_path = layout.reports_dir.join(format!("{}.json", slice.name));
+        let report = serde_json::json!({
+            "name": slice.name,
+            "description": slice.description,
+            "status": format!("{:?}", slice.status),
+            "roots": [],
+            "functions": [],
+            "evidence": [],
+        });
+        let serialized = serde_json::to_string_pretty(&report)?;
+        fs::write(&report_path, serialized).with_context(|| {
+            format!("Failed to write slice report at {}", report_path.display())
+        })?;
+        println!("Emitted slice report: {}", report_path.display());
     }
 
     Ok(())

@@ -108,6 +108,30 @@ fn project_info_reports_missing_directories() {
         .stdout(predicate::str::contains("MISSING"));
 }
 
+/// `project-info --json` should emit machine-readable snapshot including layout.
+#[test]
+fn project_info_json_output() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let output = cargo_bin_cmd!("binary-slicer")
+        .arg("project-info")
+        .arg("--root")
+        .arg(root)
+        .arg("--json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let body = String::from_utf8(output).expect("utf8");
+    let v: serde_json::Value = serde_json::from_str(&body).expect("parse json");
+    assert!(v["layout"]["rituals_dir"].as_str().unwrap().ends_with("rituals"));
+}
+
 /// `add-binary` should fail when the target binary path does not exist.
 #[test]
 fn add_binary_fails_for_missing_file() {
@@ -314,6 +338,81 @@ fn list_binaries_reports_registered_binary_with_hash() {
         .stdout(predicate::str::contains("gameclient.bin"))
         .stdout(predicate::str::contains("arch: arm64"))
         .stdout(predicate::str::contains(&expected_hash));
+}
+
+/// `emit-slice-docs` should regenerate docs from DB slices.
+#[test]
+fn emit_slice_docs_regenerates_docs() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("init-slice")
+        .arg("--root")
+        .arg(root)
+        .arg("--name")
+        .arg("Telemetry")
+        .arg("--description")
+        .arg("Telemetry slice")
+        .assert()
+        .success();
+
+    // Delete the doc to ensure regen works.
+    let layout = ritual_core::db::ProjectLayout::new(root);
+    let doc_path = layout.slices_docs_dir.join("Telemetry.md");
+    std::fs::remove_file(&doc_path).expect("delete doc");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("emit-slice-docs")
+        .arg("--root")
+        .arg(root)
+        .assert()
+        .success();
+
+    let contents = std::fs::read_to_string(&doc_path).expect("read doc");
+    assert!(contents.contains("Telemetry"));
+    assert!(contents.contains("Telemetry slice"));
+}
+
+/// `emit-slice-reports` should write JSON reports per slice.
+#[test]
+fn emit_slice_reports_regenerates_reports() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("init-slice")
+        .arg("--root")
+        .arg(root)
+        .arg("--name")
+        .arg("Telemetry")
+        .arg("--description")
+        .arg("Telemetry slice")
+        .assert()
+        .success();
+
+    let layout = ritual_core::db::ProjectLayout::new(root);
+    let report_path = layout.reports_dir.join("Telemetry.json");
+    if report_path.exists() {
+        std::fs::remove_file(&report_path).expect("delete report");
+    }
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("emit-slice-reports")
+        .arg("--root")
+        .arg(root)
+        .assert()
+        .success();
+
+    let contents = std::fs::read_to_string(&report_path).expect("read report");
+    let v: serde_json::Value = serde_json::from_str(&contents).expect("parse report");
+    assert_eq!(v["name"], "Telemetry");
+    assert_eq!(v["description"], "Telemetry slice");
+    assert_eq!(v["status"], "Planned");
 }
 
 /// `add-binary` should accept a precomputed hash and skip hashing when requested.
