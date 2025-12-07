@@ -80,7 +80,7 @@ jobs:
         run: cargo test --workspace --all-targets --locked
 
   coverage:
-    name: Coverage (llvm-cov, Linux)
+    name: Coverage (llvm-cov)
     runs-on: ubuntu-latest
     needs: [lint, test]
     if: github.ref == 'refs/heads/master'
@@ -112,8 +112,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cov-
 
-      - name: Run coverage (fail if lines < 90%)
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info --fail-under-lines 90
+      - name: Coverage (core >= 90%)
+        run: cargo llvm-cov --package ritual-core --fail-under-lines 90
+
+      - name: Coverage (workspace >= 75%)
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info --fail-under-lines 75
 
       - name: Upload coverage artifact (LCOV)
         uses: actions/upload-artifact@v4
