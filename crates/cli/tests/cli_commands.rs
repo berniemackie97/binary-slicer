@@ -82,6 +82,8 @@ fn init_project_infers_name_and_creates_db_when_root_missing() {
 
     assert_eq!(config.name, "InferThisName");
     assert!(layout.db_path.is_file(), "project DB should exist at {}", layout.db_path.display());
+    assert!(layout.outputs_dir.is_dir(), "outputs dir should exist");
+    assert!(layout.rituals_dir.is_dir(), "rituals dir should exist");
 }
 
 /// `project-info` should fail (non-zero) if the project config does not exist.
@@ -139,6 +141,7 @@ fn project_info_json_output() {
     let body = String::from_utf8(output).expect("utf8");
     let v: serde_json::Value = serde_json::from_str(&body).expect("parse json");
     assert!(v["layout"]["rituals_dir"].as_str().unwrap().ends_with("rituals"));
+    assert!(v["layout"]["outputs_dir"].as_str().unwrap().ends_with("outputs"));
 }
 
 /// `add-binary` should fail when the target binary path does not exist.
@@ -422,6 +425,208 @@ fn emit_slice_reports_regenerates_reports() {
     assert_eq!(v["name"], "Telemetry");
     assert_eq!(v["description"], "Telemetry slice");
     assert_eq!(v["status"], "Planned");
+}
+
+/// `emit-slice-docs` should no-op gracefully when there are no slices.
+#[test]
+fn emit_slice_docs_handles_empty_db() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("emit-slice-docs")
+        .arg("--root")
+        .arg(root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No slices to emit docs for."));
+}
+
+/// `emit-slice-reports` should no-op gracefully when there are no slices.
+#[test]
+fn emit_slice_reports_handles_empty_db() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("emit-slice-reports")
+        .arg("--root")
+        .arg(root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No slices to emit reports for."));
+}
+
+/// `run-ritual` should parse a spec, ensure binary exists, and write outputs per binary/ritual.
+#[test]
+fn run_ritual_scaffolds_output_for_binary() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    // Init project and add a binary.
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let bin_path = root.join("libCQ2Client.so");
+    fs::write(&bin_path, b"dummy").expect("write binary");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("CQ2Bin")
+        .assert()
+        .success();
+
+    // Write ritual spec (YAML).
+    let spec_path = root.join("ritual.yaml");
+    let spec_yaml = r#"name: SliceRun
+binary: CQ2Bin
+roots:
+  - main_loop
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .success();
+
+    let layout = ritual_core::db::ProjectLayout::new(root);
+    let run_root = layout.binary_output_root("CQ2Bin").join("SliceRun");
+    let spec_out = run_root.join("spec.yaml");
+    let report_out = run_root.join("report.json");
+
+    let spec_contents = fs::read_to_string(&spec_out).expect("read normalized spec");
+    let spec: serde_yaml::Value = serde_yaml::from_str(&spec_contents).expect("parse spec yaml");
+    assert_eq!(spec["name"], "SliceRun");
+    assert_eq!(spec["binary"], "CQ2Bin");
+    assert_eq!(spec["roots"][0], "main_loop");
+
+    let report_contents = fs::read_to_string(&report_out).expect("read report");
+    let report_json: serde_json::Value =
+        serde_json::from_str(&report_contents).expect("parse report json");
+    assert_eq!(report_json["binary"], "CQ2Bin");
+    assert_eq!(report_json["ritual"], "SliceRun");
+}
+
+/// `run-ritual` should handle JSON specs too.
+#[test]
+fn run_ritual_accepts_json_spec() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let bin_path = root.join("libGame.so");
+    fs::write(&bin_path, b"dummy").expect("write binary");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("GameBin")
+        .assert()
+        .success();
+
+    let spec_path = root.join("ritual.json");
+    let spec_json = serde_json::json!({
+        "name": "JsonRun",
+        "binary": "GameBin",
+        "roots": ["entry_point"],
+        "max_depth": 2
+    });
+    fs::write(&spec_path, serde_json::to_string_pretty(&spec_json).unwrap()).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .success();
+
+    let layout = ritual_core::db::ProjectLayout::new(root);
+    let run_root = layout.binary_output_root("GameBin").join("JsonRun");
+    assert!(run_root.is_dir());
+    assert!(run_root.join("report.json").is_file());
+}
+
+/// `run-ritual` should fail validation when roots are missing.
+#[test]
+fn run_ritual_rejects_missing_roots() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let bin_path = root.join("libBad.so");
+    fs::write(&bin_path, b"dummy").expect("write binary");
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("BadBin")
+        .assert()
+        .success();
+
+    let spec_path = root.join("invalid.yaml");
+    let spec_yaml = r#"name: Invalid
+binary: BadBin
+roots: []
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("at least one root"));
+}
+
+/// `run-ritual` should fail when the binary is not registered.
+#[test]
+fn run_ritual_errors_when_binary_missing() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let spec_path = root.join("missing.yaml");
+    let spec_yaml = r#"name: MissingBinRun
+binary: NotThere
+roots: [root_fn]
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .failure();
 }
 
 /// `add-binary` should accept a precomputed hash and skip hashing when requested.

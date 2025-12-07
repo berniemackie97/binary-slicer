@@ -115,6 +115,10 @@ pub struct ProjectLayout {
     pub graphs_dir: PathBuf,
     /// Directory for ritual specs/pipelines.
     pub rituals_dir: PathBuf,
+    /// Directory for analysis outputs (organized by binary).
+    pub outputs_dir: PathBuf,
+    /// Directory for per-binary output artifacts.
+    pub outputs_binaries_dir: PathBuf,
 }
 
 impl ProjectLayout {
@@ -131,6 +135,8 @@ impl ProjectLayout {
         let reports_dir = root.join("reports");
         let graphs_dir = root.join("graphs");
         let rituals_dir = root.join("rituals");
+        let outputs_dir = root.join("outputs");
+        let outputs_binaries_dir = outputs_dir.join("binaries");
 
         Self {
             root,
@@ -142,6 +148,8 @@ impl ProjectLayout {
             reports_dir,
             graphs_dir,
             rituals_dir,
+            outputs_dir,
+            outputs_binaries_dir,
         }
     }
 
@@ -152,6 +160,11 @@ impl ProjectLayout {
             Ok(rel) => rel.to_string_lossy().to_string(),
             Err(_) => self.db_path.to_string_lossy().to_string(),
         }
+    }
+
+    /// Helper to compute a per-binary output root directory.
+    pub fn binary_output_root(&self, binary_name: &str) -> PathBuf {
+        self.outputs_binaries_dir.join(binary_name)
     }
 }
 

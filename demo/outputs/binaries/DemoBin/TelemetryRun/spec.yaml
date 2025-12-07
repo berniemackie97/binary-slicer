@@ -1,0 +1,10 @@
+name: TelemetryRun
+binary: DemoBin
+roots:
+- entry_point
+max_depth: null
+description: null
+outputs:
+  reports: true
+  graphs: true
+  docs: true

@@ -1,0 +1,4 @@
+name: TelemetryRun
+binary: DemoBin
+roots:
+  - entry_point

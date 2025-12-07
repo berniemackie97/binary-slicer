@@ -4,6 +4,7 @@ use std::path::Path;
 use anyhow::{anyhow, Context, Result};
 use binary_slicer::{canonicalize_or_current, infer_project_name, sha256_file};
 use clap::{Parser, Subcommand};
+use serde::Deserialize;
 use serde::Serialize;
 
 /// Slice-oriented reverse-engineering assistant CLI.
@@ -149,6 +150,17 @@ enum Command {
         #[arg(long, default_value = ".")]
         root: String,
     },
+
+    /// Run a ritual spec (YAML/JSON) against a target binary (analysis stub for now).
+    RunRitual {
+        /// Project root directory. Defaults to the current working directory.
+        #[arg(long, default_value = ".")]
+        root: String,
+
+        /// Path to the ritual spec (YAML/JSON).
+        #[arg(long)]
+        file: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -169,6 +181,7 @@ fn main() -> Result<()> {
         Command::ListBinaries { root, json } => list_binaries_command(&root, json)?,
         Command::EmitSliceDocs { root } => emit_slice_docs_command(&root)?,
         Command::EmitSliceReports { root } => emit_slice_reports_command(&root)?,
+        Command::RunRitual { root, file } => run_ritual_command(&root, &file)?,
     }
 
     Ok(())
@@ -215,6 +228,15 @@ fn init_project_command(root: &str, name: Option<String>) -> Result<()> {
     fs::create_dir_all(&layout.rituals_dir).with_context(|| {
         format!("Failed to create rituals dir: {}", layout.rituals_dir.display())
     })?;
+    fs::create_dir_all(&layout.outputs_dir).with_context(|| {
+        format!("Failed to create outputs dir: {}", layout.outputs_dir.display())
+    })?;
+    fs::create_dir_all(&layout.outputs_binaries_dir).with_context(|| {
+        format!(
+            "Failed to create per-binary outputs dir: {}",
+            layout.outputs_binaries_dir.display()
+        )
+    })?;
 
     // Build project config.
     let db_path_rel = layout.db_path_relative_string();
@@ -241,6 +263,9 @@ fn init_project_command(root: &str, name: Option<String>) -> Result<()> {
     println!("  Slices docs dir: {}", layout.slices_docs_dir.display());
     println!("  Reports dir: {}", layout.reports_dir.display());
     println!("  Graphs dir: {}", layout.graphs_dir.display());
+    println!("  Rituals dir: {}", layout.rituals_dir.display());
+    println!("  Outputs dir: {}", layout.outputs_dir.display());
+    println!("  Outputs dir: {}", layout.outputs_dir.display());
 
     Ok(())
 }
@@ -265,6 +290,7 @@ struct ProjectInfoLayout {
     reports_dir: String,
     graphs_dir: String,
     rituals_dir: String,
+    outputs_dir: String,
 }
 
 /// Show basic information about an existing project.
@@ -308,6 +334,7 @@ fn project_info_command(root: &str, json: bool) -> Result<()> {
                 reports_dir: layout.reports_dir.display().to_string(),
                 graphs_dir: layout.graphs_dir.display().to_string(),
                 rituals_dir: layout.rituals_dir.display().to_string(),
+                outputs_dir: layout.outputs_dir.display().to_string(),
             },
             binaries,
             slices,
@@ -701,8 +728,128 @@ fn emit_slice_reports_command(root: &str) -> Result<()> {
     Ok(())
 }
 
+/// Run a ritual spec (stub analysis) and organize outputs per binary and ritual name.
+fn run_ritual_command(root: &str, file: &str) -> Result<()> {
+    use ritual_core::db::{ProjectConfig, ProjectDb, ProjectLayout};
+
+    let root_path = canonicalize_or_current(root)?;
+    let layout = ProjectLayout::new(&root_path);
+
+    // Load project config.
+    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
+        format!("Failed to read project config at {}", layout.project_config_path.display())
+    })?;
+    let config: ProjectConfig =
+        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
+
+    // Resolve DB path (may be relative or absolute in config).
+    let config_db_path = Path::new(&config.db.path);
+    let db_path = if config_db_path.is_absolute() {
+        config_db_path.to_path_buf()
+    } else {
+        layout.root.join(config_db_path)
+    };
+    let db = ProjectDb::open(&db_path)
+        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+
+    // Load ritual spec (supports YAML or JSON based on extension).
+    let spec_path = Path::new(file);
+    let spec_file = fs::File::open(spec_path)
+        .with_context(|| format!("Failed to open ritual spec at {}", spec_path.display()))?;
+    let spec: RitualSpec = if spec_path.extension().and_then(|e| e.to_str()) == Some("json") {
+        serde_json::from_reader(spec_file).context("Failed to parse ritual spec JSON")?
+    } else {
+        serde_yaml::from_reader(spec_file).context("Failed to parse ritual spec YAML")?
+    };
+    spec.validate()?;
+
+    // Make sure the binary exists in the DB.
+    let binaries = db.list_binaries().context("Failed to list binaries")?;
+    let target_bin = binaries
+        .iter()
+        .find(|b| b.name == spec.binary || b.path.ends_with(&spec.binary))
+        .cloned()
+        .ok_or_else(|| anyhow!("Binary '{}' not found in project database", spec.binary))?;
+
+    // Prepare output directories.
+    let bin_output_root = layout.binary_output_root(&target_bin.name);
+    let run_output_root = bin_output_root.join(&spec.name);
+    fs::create_dir_all(&run_output_root).with_context(|| {
+        format!("Failed to create ritual output dir {}", run_output_root.display())
+    })?;
+
+    // Persist a normalized spec copy into the run directory.
+    let normalized_spec_path = run_output_root.join("spec.yaml");
+    let mut spec_copy = spec;
+    if spec_copy.outputs.is_none() {
+        spec_copy.outputs = Some(RitualOutputs { reports: true, graphs: true, docs: true });
+    }
+    let yaml = serde_yaml::to_string(&spec_copy).context("Failed to serialize ritual spec")?;
+    fs::write(&normalized_spec_path, yaml).with_context(|| {
+        format!("Failed to write normalized spec to {}", normalized_spec_path.display())
+    })?;
+
+    // Stub analysis output placeholders.
+    let report_path = run_output_root.join("report.json");
+    let report = serde_json::json!({
+        "ritual": spec_copy.name,
+        "binary": target_bin.name,
+        "roots": spec_copy.roots,
+        "max_depth": spec_copy.max_depth,
+        "status": "stubbed",
+        "functions": [],
+        "edges": [],
+    });
+    fs::write(&report_path, serde_json::to_string_pretty(&report)?)
+        .with_context(|| format!("Failed to write ritual report at {}", report_path.display()))?;
+
+    println!("Ran ritual (stub): {}", spec_copy.name);
+    println!("  Binary: {}", target_bin.name);
+    println!("  Roots: {:?}", spec_copy.roots);
+    println!("  Output: {}", run_output_root.display());
+
+    Ok(())
+}
+
 /// Helper to print whether a directory exists.
 fn print_dir_status(label: &str, path: &Path) {
     let exists = path.is_dir();
     println!("- {label}: {} ({})", if exists { "OK" } else { "MISSING" }, path.display());
+}
+#[derive(Debug, Deserialize, Serialize)]
+struct RitualSpec {
+    name: String,
+    binary: String,
+    roots: Vec<String>,
+    #[serde(default)]
+    max_depth: Option<u32>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    outputs: Option<RitualOutputs>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct RitualOutputs {
+    #[serde(default)]
+    reports: bool,
+    #[serde(default)]
+    graphs: bool,
+    #[serde(default)]
+    docs: bool,
+}
+
+impl RitualSpec {
+    fn validate(&self) -> Result<()> {
+        if self.name.trim().is_empty() {
+            return Err(anyhow!("Ritual spec 'name' is required"));
+        }
+        if self.binary.trim().is_empty() {
+            return Err(anyhow!("Ritual spec 'binary' is required"));
+        }
+        if self.roots.is_empty() {
+            return Err(anyhow!("Ritual spec must include at least one root"));
+        }
+        Ok(())
+    }
 }

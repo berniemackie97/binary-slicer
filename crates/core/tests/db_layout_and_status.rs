@@ -14,6 +14,11 @@ fn project_layout_uses_expected_paths() {
     assert_eq!(layout.reports_dir, PathBuf::from("/my/project/reports"));
     assert_eq!(layout.graphs_dir, PathBuf::from("/my/project/graphs"));
     assert_eq!(layout.rituals_dir, PathBuf::from("/my/project/rituals"));
+    assert_eq!(layout.outputs_dir, PathBuf::from("/my/project/outputs"));
+    assert_eq!(layout.outputs_binaries_dir, PathBuf::from("/my/project/outputs/binaries"));
+
+    let bin_root = layout.binary_output_root("libCQ2Client.so");
+    assert_eq!(bin_root, PathBuf::from("/my/project/outputs/binaries/libCQ2Client.so"));
 
     // Relative string should drop the root prefix when possible.
     let expected_rel = format!(".ritual{}project.db", MAIN_SEPARATOR);
