@@ -28,12 +28,14 @@ fn slice_record_and_status_round_trip() {
     assert_eq!(deserialized.status, SliceStatus::Active);
 
     // Explicitly test status mapping.
-    assert_eq!(SliceStatus::Draft.to_i32(), 0);
-    assert_eq!(SliceStatus::Active.to_i32(), 1);
-    assert_eq!(SliceStatus::Deprecated.to_i32(), 2);
-    assert_eq!(SliceStatus::from_i32(0), SliceStatus::Draft);
-    assert_eq!(SliceStatus::from_i32(1), SliceStatus::Active);
-    assert_eq!(SliceStatus::from_i32(2), SliceStatus::Deprecated);
+    assert_eq!(SliceStatus::Planned.to_i32(), 0);
+    assert_eq!(SliceStatus::Draft.to_i32(), 1);
+    assert_eq!(SliceStatus::Active.to_i32(), 2);
+    assert_eq!(SliceStatus::Deprecated.to_i32(), 3);
+    assert_eq!(SliceStatus::from_i32(0), SliceStatus::Planned);
+    assert_eq!(SliceStatus::from_i32(1), SliceStatus::Draft);
+    assert_eq!(SliceStatus::from_i32(2), SliceStatus::Active);
+    assert_eq!(SliceStatus::from_i32(3), SliceStatus::Deprecated);
     // Unknown values fall back to Draft.
     assert_eq!(SliceStatus::from_i32(99), SliceStatus::Draft);
 }

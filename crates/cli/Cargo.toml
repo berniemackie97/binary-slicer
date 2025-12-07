@@ -1,5 +1,5 @@
 [package]
-name = "ritual-cli"
+name = "binary-slicer"
 edition = "2021"
 version = "0.1.0"
 description = "CLI frontend for ritual-core."
@@ -11,8 +11,9 @@ clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ritual-core = { path = "../core" }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
 tempfile = { workspace = true }
-
+predicates = { workspace = true }

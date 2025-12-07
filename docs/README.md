@@ -1,6 +1,6 @@
-# Ritual Slicer Documentation
+# Binary Slicer Documentation
 
-This directory contains documentation and design notes for Ritual Slicer.
+This directory contains documentation and design notes for Binary Slicer.
 
 - [`adr/`](./adr/) — Architecture Decision Records (ADRs) for key design choices.
 - `slices/` (planned) — Generated slice documentation (`docs/slices/<slice>.md`).

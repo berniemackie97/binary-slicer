@@ -1,13 +1,13 @@
 //! Project database integration and project layout definitions.
 //!
-//! This module will eventually wrap a SQLite database storing:
+//! This module wraps a SQLite database storing, eventually:
 //! - Binaries and their metadata
 //! - Slices and their evolution across builds
 //! - Functions, xrefs, strings, and evidence records
 //! - Ritual run histories
 //!
 //! For now, we define:
-//! - `DbConfig`: simple DB path wrapper (placeholder).
+//! - `DbConfig`: simple DB path wrapper.
 //! - `ProjectConfig`: serializable project metadata.
 //! - `ProjectLayout`: computed paths for project directories/files.
 //! - `ProjectDb`: a small SQLite wrapper with schema v1.
@@ -19,12 +19,29 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection};
 use thiserror::Error;
 
+/// Minimum schema version we know how to handle.
+///
+/// `0` means "no schema yet" (fresh DB).
+const MIN_SUPPORTED_SCHEMA_VERSION: i32 = 0;
+
+/// Latest schema version this crate knows about.
+const CURRENT_SCHEMA_VERSION: i32 = 1;
+
 /// Error type for project database operations.
 #[derive(Debug, Error)]
 pub enum DbError {
     /// Underlying SQLite error.
     #[error("SQLite error: {0}")]
     Sql(#[from] rusqlite::Error),
+
+    /// The database was created with a newer schema version than we support.
+    ///
+    /// This is intentionally explicit so callers can surface a clear message
+    /// instead of silently clobbering or misinterpreting data.
+    #[error(
+        "Unsupported schema version {found}; supported range is {min_supported}..={max_supported}"
+    )]
+    UnsupportedSchemaVersion { found: i32, min_supported: i32, max_supported: i32 },
 }
 
 /// Convenience result type for DB operations.
@@ -46,7 +63,7 @@ impl DbConfig {
     }
 }
 
-/// Serializable configuration describing a Ritual Slicer project.
+/// Serializable configuration describing a Binary Slicer project.
 ///
 /// This lives (for now) at `.ritual/project.json` in the project root.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -139,7 +156,9 @@ impl ProjectLayout {
 /// This is intentionally simple; finer-grained states can be added later.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum SliceStatus {
-    /// Slice exists but hasn't been fleshed out.
+    /// Slice name reserved / planned, but not yet actively worked.
+    Planned,
+    /// Slice exists but hasn't been fully fleshed out.
     Draft,
     /// Slice is actively maintained and trusted.
     Active,
@@ -151,17 +170,20 @@ impl SliceStatus {
     /// Encode as an integer for storage in SQLite.
     pub fn to_i32(self) -> i32 {
         match self {
-            SliceStatus::Draft => 0,
-            SliceStatus::Active => 1,
-            SliceStatus::Deprecated => 2,
+            SliceStatus::Planned => 0,
+            SliceStatus::Draft => 1,
+            SliceStatus::Active => 2,
+            SliceStatus::Deprecated => 3,
         }
     }
 
     /// Decode from an integer stored in SQLite.
     pub fn from_i32(value: i32) -> Self {
         match value {
-            1 => SliceStatus::Active,
-            2 => SliceStatus::Deprecated,
+            0 => SliceStatus::Planned,
+            1 => SliceStatus::Draft,
+            2 => SliceStatus::Active,
+            3 => SliceStatus::Deprecated,
             _ => SliceStatus::Draft,
         }
     }
@@ -206,6 +228,15 @@ pub struct SliceRecord {
 impl SliceRecord {
     pub fn new(name: impl Into<String>, status: SliceStatus) -> Self {
         Self { name: name.into(), description: None, status }
+    }
+
+    /// Builder-style helper to attach a description when constructing a record.
+    ///
+    /// This is mainly for ergonomics in CLI wiring:
+    /// `SliceRecord::new(name, SliceStatus::Planned).with_description(description)`
+    pub fn with_description(mut self, description: Option<String>) -> Self {
+        self.description = description;
+        self
     }
 }
 
@@ -328,6 +359,15 @@ impl ProjectDb {
 /// - 1: initial schema (binaries, slices)
 fn apply_migrations(conn: &Connection) -> DbResult<()> {
     let current_version = current_schema_version(conn)?;
+
+    // Reject DBs created with a newer schema than we support.
+    if current_version > CURRENT_SCHEMA_VERSION {
+        return Err(DbError::UnsupportedSchemaVersion {
+            found: current_version,
+            min_supported: MIN_SUPPORTED_SCHEMA_VERSION,
+            max_supported: CURRENT_SCHEMA_VERSION,
+        });
+    }
 
     if current_version == 0 {
         // Initial schema.

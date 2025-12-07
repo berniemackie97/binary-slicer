@@ -22,16 +22,16 @@ We also want:
 
 ## Decision
 
-We will implement Ritual Slicer as:
+We will implement Binary Slicer as:
 
 1. A Rust **workspace** with:
-   - `ritual-core` — library crate containing:
+   - `ritual-core` - library crate containing:
      - Internal IR for binaries, functions, slices, and evidence.
      - Analysis and slice-carving logic.
      - Ritual DSL parsing and execution.
      - Integration with disassembly backends (Capstone, rizin, etc.).
      - Project database layer (SQLite).
-   - `ritual-cli` — binary crate providing:
+   - `binary-slicer` - binary crate providing:
      - Command-line interface for running rituals and managing projects.
      - Export of Markdown/JSON/Graphviz artifacts.
 

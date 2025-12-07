@@ -1,9 +1,12 @@
 use std::env;
 use std::fs;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
+use serde_json;
+use sha2::{Digest, Sha256};
 
 /// Slice-oriented reverse-engineering assistant CLI.
 ///
@@ -12,7 +15,7 @@ use clap::{Parser, Subcommand};
 /// and reused from other frontends.
 #[derive(Parser, Debug)]
 #[command(
-    name = "ritual-slicer",
+    name = "binary-slicer",
     version,
     about = "Slice-oriented reverse-engineering assistant",
     long_about = None
@@ -31,7 +34,7 @@ enum Command {
         slice: String,
     },
 
-    /// Initialize a new Ritual Slicer project at the given root.
+    /// Initialize a new Binary Slicer project at the given root.
     ///
     /// This will:
     /// - Create a `.ritual` metadata directory.
@@ -47,7 +50,7 @@ enum Command {
         name: Option<String>,
     },
 
-    /// Show basic information about an existing Ritual Slicer project.
+    /// Show basic information about an existing Binary Slicer project.
     ///
     /// This reads `.ritual/project.json` and reports key paths and config values.
     ProjectInfo {
@@ -72,23 +75,63 @@ enum Command {
         /// Optional human-friendly name. Defaults to the file name.
         #[arg(long)]
         name: Option<String>,
+
+        /// Optional architecture hint (e.g., armv7, x86_64).
+        #[arg(long)]
+        arch: Option<String>,
+
+        /// Optional precomputed hash. If omitted, the CLI computes SHA-256 unless `--skip-hash` is set.
+        #[arg(long)]
+        hash: Option<String>,
+
+        /// Skip hash computation (stores no hash).
+        #[arg(long, default_value_t = false)]
+        skip_hash: bool,
     },
 
-    /// Initialize a new slice and scaffold its documentation.
+    /// Initialize a new slice record and its documentation scaffold.
     ///
-    /// This creates `docs/slices/<Name>.md` under the project root.
+    /// This will:
+    /// - Insert a slice record into the project database.
+    /// - Create `docs/slices/<Name>.md` with a basic template.
     InitSlice {
         /// Project root directory. Defaults to the current working directory.
         #[arg(long, default_value = ".")]
         root: String,
 
-        /// Name of the slice (e.g., AutoUpdateManager, CUIManager).
+        /// Name of the slice (e.g., `AutoUpdateManager`).
         #[arg(long)]
         name: String,
 
         /// Optional human-readable description of the slice.
         #[arg(long)]
         description: Option<String>,
+    },
+
+    /// List all slices registered in the project database.
+    ///
+    /// Shows name, status, and optional description for each slice.
+    ListSlices {
+        /// Project root directory. Defaults to the current working directory.
+        #[arg(long, default_value = ".")]
+        root: String,
+
+        /// Emit JSON instead of human-readable text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+
+    /// List all binaries registered in the project database.
+    ///
+    /// Shows name, path, arch, and hash if available.
+    ListBinaries {
+        /// Project root directory. Defaults to the current working directory.
+        #[arg(long, default_value = ".")]
+        root: String,
+
+        /// Emit JSON instead of human-readable text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
 }
 
@@ -100,10 +143,14 @@ fn main() -> Result<()> {
         Command::Hello { slice } => hello_command(&slice)?,
         Command::InitProject { root, name } => init_project_command(&root, name)?,
         Command::ProjectInfo { root } => project_info_command(&root)?,
-        Command::AddBinary { root, path, name } => add_binary_command(&root, &path, name)?,
+        Command::AddBinary { root, path, name, arch, hash, skip_hash } => {
+            add_binary_command(&root, &path, name, arch, hash, skip_hash)?
+        }
         Command::InitSlice { root, name, description } => {
             init_slice_command(&root, &name, description)?
         }
+        Command::ListSlices { root, json } => list_slices_command(&root, json)?,
+        Command::ListBinaries { root, json } => list_binaries_command(&root, json)?,
     }
 
     Ok(())
@@ -115,7 +162,7 @@ fn hello_command(slice_name: &str) -> Result<()> {
     let version = ritual_core::version();
     let result = ritual_core::analysis::hello_slice(slice_name);
 
-    println!("ritual-slicer v{}", version);
+    println!("binary-slicer v{}", version);
     println!("Hello, slice: {}", result.slice.name);
     println!("Functions in this (stub) slice:");
     for func in result.functions {
@@ -158,7 +205,13 @@ fn init_project_command(root: &str, name: Option<String>) -> Result<()> {
         format!("Failed to write project config: {}", layout.project_config_path.display())
     })?;
 
-    println!("Initialized Ritual Slicer project:");
+    // Create the project database immediately so follow-on commands (and tests)
+    // can rely on its presence.
+    ritual_core::db::ProjectDb::open(&layout.db_path).with_context(|| {
+        format!("Failed to initialize project database at {}", layout.db_path.display())
+    })?;
+
+    println!("Initialized Binary Slicer project:");
     println!("  Name: {}", project_name);
     println!("  Root: {}", layout.root.display());
     println!("  Config: {}", layout.project_config_path.display());
@@ -184,7 +237,7 @@ fn project_info_command(root: &str) -> Result<()> {
     let config: ritual_core::db::ProjectConfig =
         serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
 
-    println!("Ritual Slicer Project Info");
+    println!("Binary Slicer Project Info");
     println!("==========================");
     println!("Name: {}", config.name);
     println!("Root: {}", layout.root.display());
@@ -205,7 +258,14 @@ fn project_info_command(root: &str) -> Result<()> {
 }
 
 /// Register a binary in the project database.
-fn add_binary_command(root: &str, path: &str, name: Option<String>) -> Result<()> {
+fn add_binary_command(
+    root: &str,
+    path: &str,
+    name: Option<String>,
+    arch: Option<String>,
+    hash: Option<String>,
+    skip_hash: bool,
+) -> Result<()> {
     let root_path = canonicalize_or_current(root)?;
     let layout = ritual_core::db::ProjectLayout::new(&root_path);
 
@@ -241,22 +301,32 @@ fn add_binary_command(root: &str, path: &str, name: Option<String>) -> Result<()
     }
 
     // Store path relative to project root when possible.
-    let rel_path = match abs_path.strip_prefix(&root_path) {
-        Ok(rel) => rel.to_path_buf(),
-        Err(_) => abs_path.clone(),
-    };
+    let rel_path = abs_path
+        .canonicalize()
+        .ok()
+        .and_then(|abs_canon| {
+            root_path.canonicalize().ok().and_then(|root_canon| {
+                abs_canon.strip_prefix(&root_canon).ok().map(|p| p.to_path_buf())
+            })
+        })
+        .or_else(|| abs_path.strip_prefix(&root_path).ok().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| abs_path.clone());
     let rel_path_str = rel_path.to_string_lossy().to_string();
 
     let binary_name = name.unwrap_or_else(|| {
         input_path.file_name().and_then(|os| os.to_str()).unwrap_or(path).to_string()
     });
 
-    let record = ritual_core::db::BinaryRecord {
-        name: binary_name,
-        path: rel_path_str,
-        arch: None,
-        hash: None,
+    let hash = if let Some(h) = hash {
+        Some(h)
+    } else if skip_hash {
+        None
+    } else {
+        Some(sha256_file(&abs_path)?)
     };
+
+    let record =
+        ritual_core::db::BinaryRecord { name: binary_name, path: rel_path_str, arch, hash };
 
     let id = db.insert_binary(&record).context("Failed to insert binary record")?;
 
@@ -269,60 +339,169 @@ fn add_binary_command(root: &str, path: &str, name: Option<String>) -> Result<()
     Ok(())
 }
 
-/// Initialize a new slice and scaffold its documentation under docs/slices.
-///
-/// This does *not* yet register the slice in the DB; that will come in a later step.
-/// For now, it validates the project root and creates a Markdown stub.
+/// Initialize a slice record and its documentation scaffold.
 fn init_slice_command(root: &str, name: &str, description: Option<String>) -> Result<()> {
+    use ritual_core::db::{ProjectConfig, ProjectDb, ProjectLayout, SliceRecord, SliceStatus};
+
     let root_path = canonicalize_or_current(root)?;
-    let layout = ritual_core::db::ProjectLayout::new(&root_path);
+    let layout = ProjectLayout::new(&root_path);
 
-    // Ensure this is a Ritual project by checking for project config.
-    if !layout.project_config_path.exists() {
-        return Err(anyhow!(
-            "No Ritual project config found at {} (expected {})",
-            root_path.display(),
-            layout.project_config_path.display()
-        ));
-    }
-
-    // Ensure docs/slices directory exists.
-    fs::create_dir_all(&layout.slices_docs_dir).with_context(|| {
-        format!("Failed to create slices docs directory: {}", layout.slices_docs_dir.display())
+    // Load project config.
+    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
+        format!("Failed to read project config at {}", layout.project_config_path.display())
     })?;
+    let config: ProjectConfig =
+        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
 
-    // Compute slice doc path.
-    let file_name = format!("{name}.md");
-    let doc_path = layout.slices_docs_dir.join(&file_name);
+    // Resolve DB path (may be relative or absolute in config).
+    let config_db_path = Path::new(&config.db.path);
+    let db_path = if config_db_path.is_absolute() {
+        config_db_path.to_path_buf()
+    } else {
+        layout.root.join(config_db_path)
+    };
 
-    if doc_path.exists() {
-        return Err(anyhow!("Slice doc already exists: {}", doc_path.display()));
+    let db = ProjectDb::open(&db_path)
+        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+
+    // Insert or update the slice record.
+    let record = SliceRecord::new(name, SliceStatus::Planned).with_description(description.clone());
+    db.insert_slice(&record).context("Failed to insert slice record")?;
+
+    // Create/update the slice doc in docs/slices/<Name>.md.
+    let doc_path = layout.slices_docs_dir.join(format!("{name}.md"));
+
+    if !doc_path.exists() {
+        let mut contents = String::new();
+        contents.push_str(&format!("# {name}\n\n"));
+        if let Some(desc) = &description {
+            contents.push_str(desc);
+            contents.push_str("\n\n");
+        } else {
+            contents.push_str("TODO: add a human-readable description of this slice.\n\n");
+        }
+        contents.push_str("## Roots\n");
+        contents
+            .push_str("- TODO: list root functions (by address/name) that define this slice.\n\n");
+        contents.push_str("## Functions\n");
+        contents.push_str("- TODO: populated by analysis runs.\n\n");
+        contents.push_str("## Evidence\n");
+        contents
+            .push_str("- TODO: xrefs, strings, patterns that justify membership in this slice.\n");
+
+        fs::write(&doc_path, contents)
+            .with_context(|| format!("Failed to write slice doc at {}", doc_path.display()))?;
     }
-
-    let description_line = description.unwrap_or_else(|| "TODO: describe this slice.".to_string());
-
-    let contents = format!(
-        "# Slice: {name}\n\n\
-         {description_line}\n\n\
-         ## Roots\n\n\
-         - TODO: list known root functions (addresses, names, string refs).\n\n\
-         ## Purpose\n\n\
-         - TODO: high-level purpose of this subsystem.\n\n\
-         ## Key Functions\n\n\
-         - TODO: generated from analysis.\n\n\
-         ## External Dependencies\n\n\
-         - TODO: calls into other slices or libraries.\n\n\
-         ## Evidence Index\n\n\
-         - TODO: map claims above to concrete addresses/xrefs.\n"
-    );
-
-    fs::write(&doc_path, contents)
-        .with_context(|| format!("Failed to write slice doc at {}", doc_path.display()))?;
 
     println!("Initialized slice:");
     println!("  Name: {name}");
-    println!("  Root: {}", root_path.display());
+    println!("  Root: {}", layout.root.display());
     println!("  Doc:  {}", doc_path.display());
+
+    Ok(())
+}
+
+/// List all slices registered in the project database.
+fn list_slices_command(root: &str, json: bool) -> Result<()> {
+    use ritual_core::db::{ProjectConfig, ProjectDb, ProjectLayout};
+
+    let root_path = canonicalize_or_current(root)?;
+    let layout = ProjectLayout::new(&root_path);
+
+    // Load project config.
+    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
+        format!("Failed to read project config at {}", layout.project_config_path.display())
+    })?;
+    let config: ProjectConfig =
+        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
+
+    // Resolve DB path (may be relative or absolute in config).
+    let config_db_path = Path::new(&config.db.path);
+    let db_path = if config_db_path.is_absolute() {
+        config_db_path.to_path_buf()
+    } else {
+        layout.root.join(config_db_path)
+    };
+
+    let db = ProjectDb::open(&db_path)
+        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+
+    let slices = db.list_slices().context("Failed to list slices")?;
+
+    if json {
+        let serialized =
+            serde_json::to_string_pretty(&slices).context("Failed to serialize slices to JSON")?;
+        println!("{}", serialized);
+    } else {
+        println!("Slices ({}):", slices.len());
+        if slices.is_empty() {
+            println!("  (none)");
+            return Ok(());
+        }
+
+        for slice in slices {
+            let status_str = format!("{:?}", slice.status);
+            match slice.description {
+                Some(desc) => {
+                    println!("  - {} [{}] - {}", slice.name, status_str, desc);
+                }
+                None => {
+                    println!("  - {} [{}]", slice.name, status_str);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// List all binaries registered in the project database.
+fn list_binaries_command(root: &str, json: bool) -> Result<()> {
+    use ritual_core::db::{ProjectConfig, ProjectDb, ProjectLayout};
+
+    let root_path = canonicalize_or_current(root)?;
+    let layout = ProjectLayout::new(&root_path);
+
+    // Load project config.
+    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
+        format!("Failed to read project config at {}", layout.project_config_path.display())
+    })?;
+    let config: ProjectConfig =
+        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
+
+    // Resolve DB path (may be relative or absolute in config).
+    let config_db_path = Path::new(&config.db.path);
+    let db_path = if config_db_path.is_absolute() {
+        config_db_path.to_path_buf()
+    } else {
+        layout.root.join(config_db_path)
+    };
+
+    let db = ProjectDb::open(&db_path)
+        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+
+    let binaries = db.list_binaries().context("Failed to list binaries")?;
+
+    if json {
+        let serialized = serde_json::to_string_pretty(&binaries)
+            .context("Failed to serialize binaries to JSON")?;
+        println!("{}", serialized);
+    } else {
+        println!("Binaries ({}):", binaries.len());
+        if binaries.is_empty() {
+            println!("  (none)");
+            return Ok(());
+        }
+
+        for bin in binaries {
+            let arch_display = bin.arch.as_deref().unwrap_or("-");
+            let hash_display = bin.hash.as_deref().unwrap_or("-");
+            println!(
+                "  - {} [arch: {}] path={} hash={}",
+                bin.name, arch_display, bin.path, hash_display
+            );
+        }
+    }
 
     Ok(())
 }
@@ -357,4 +536,69 @@ fn infer_project_name(root: &Path) -> String {
 fn print_dir_status(label: &str, path: &Path) {
     let exists = path.is_dir();
     println!("- {label}: {} ({})", if exists { "OK" } else { "MISSING" }, path.display());
+}
+
+/// Compute the SHA-256 hash of a file and return it as a hex string.
+fn sha256_file(path: &Path) -> Result<String> {
+    let file = fs::File::open(path)
+        .with_context(|| format!("Failed to open binary for hashing: {}", path.display()))?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 8192];
+
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .with_context(|| format!("Failed to read binary for hashing: {}", path.display()))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+
+    let digest = hasher.finalize();
+    Ok(format!("{:x}", digest))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn canonicalize_or_current_returns_cwd_for_dot() {
+        let original = env::current_dir().expect("cwd");
+        let tmp = tempdir().expect("tempdir");
+        env::set_current_dir(tmp.path()).expect("chdir tmp");
+
+        let result = canonicalize_or_current(".").expect("canonicalize");
+        assert_eq!(result, tmp.path());
+
+        env::set_current_dir(original).expect("restore cwd");
+    }
+
+    #[test]
+    fn canonicalize_or_current_resolves_existing_relative_path() {
+        let original = env::current_dir().expect("cwd");
+        let tmp = tempdir().expect("tempdir");
+        let subdir = tmp.path().join("nested");
+        fs::create_dir_all(&subdir).expect("create nested");
+        env::set_current_dir(tmp.path()).expect("chdir tmp");
+
+        let result = canonicalize_or_current("nested").expect("canonicalize nested");
+        assert_eq!(result, subdir.canonicalize().expect("canonicalize subdir"));
+
+        env::set_current_dir(original).expect("restore cwd");
+    }
+
+    #[test]
+    fn infer_project_name_uses_last_path_component() {
+        assert_eq!(infer_project_name(Path::new("C:/work/binary-slicer")), "binary-slicer");
+        assert_eq!(infer_project_name(Path::new("/tmp/project-root")), "project-root");
+    }
+
+    #[test]
+    fn infer_project_name_falls_back_when_missing() {
+        assert_eq!(infer_project_name(Path::new("/")), "unnamed-project");
+    }
 }
