@@ -1,5 +1,9 @@
 use binary_slicer::commands::{
-    collect_ritual_runs_on_disk, collect_ritual_specs, sha256_bytes, validate_run_status,
+    add_binary_command, clean_outputs_command, collect_ritual_runs_on_disk, collect_ritual_specs,
+    emit_slice_docs_command, emit_slice_reports_command, init_project_command, init_slice_command,
+    list_binaries_command, list_ritual_runs_command, list_ritual_specs_command,
+    list_slices_command, project_info_command, rerun_ritual_command, run_ritual_command,
+    sha256_bytes, show_ritual_run_command, update_ritual_run_status_command, validate_run_status,
     RitualRunMetadata, RitualSpec,
 };
 use ritual_core::db::RitualRunStatus;
@@ -115,4 +119,183 @@ fn collect_ritual_runs_on_disk_reads_metadata() {
     assert_eq!(runs[0].binary, "TestBin");
     assert_eq!(runs[0].name, "TestRun");
     assert_eq!(runs[0].status.as_deref(), Some("stubbed"));
+}
+
+#[test]
+fn direct_project_and_slice_commands_execute() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+
+    init_project_command(&root, Some("DirectProject".into())).unwrap();
+
+    // add a binary and list it
+    let bin_path = temp.path().join("binA.so");
+    std::fs::write(&bin_path, b"payload").unwrap();
+    add_binary_command(
+        &root,
+        bin_path.to_str().unwrap(),
+        Some("BinA".into()),
+        Some("armv7".into()),
+        None,
+        false,
+    )
+    .unwrap();
+    list_binaries_command(&root, false).unwrap();
+
+    // slice commands
+    init_slice_command(&root, "SliceA", Some("desc".into())).unwrap();
+    list_slices_command(&root, false).unwrap();
+    emit_slice_docs_command(&root).unwrap();
+    emit_slice_reports_command(&root).unwrap();
+
+    // project-info human and json
+    project_info_command(&root, false).unwrap();
+    project_info_command(&root, true).unwrap();
+}
+
+#[test]
+fn direct_ritual_commands_execute_and_update_status() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+
+    init_project_command(&root, Some("RitualProj".into())).unwrap();
+    let bin_path = temp.path().join("binR.so");
+    std::fs::write(&bin_path, b"payload").unwrap();
+    add_binary_command(&root, bin_path.to_str().unwrap(), Some("BinR".into()), None, None, false)
+        .unwrap();
+
+    // write spec yaml and run
+    let spec_path = temp.path().join("rit.yaml");
+    std::fs::write(&spec_path, "name: RunOne\nbinary: BinR\nroots: [entry_point]\nmax_depth: 1\n")
+        .unwrap();
+    run_ritual_command(&root, spec_path.to_str().unwrap(), false).unwrap();
+
+    // list & show runs/specs
+    list_ritual_runs_command(&root, Some("BinR"), true).unwrap();
+    list_ritual_specs_command(&root, false).unwrap();
+    show_ritual_run_command(&root, "BinR", "RunOne", true).unwrap();
+
+    // rerun and update status
+    rerun_ritual_command(&root, "BinR", "RunOne", "RunTwo", true).unwrap();
+    update_ritual_run_status_command(&root, "BinR", "RunTwo", "succeeded", None).unwrap();
+
+    // clean outputs
+    clean_outputs_command(&root, Some("BinR"), None, false, true).unwrap();
+}
+
+#[test]
+fn emit_slice_commands_handle_empty_db() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("EmptyProj".into())).unwrap();
+    // No slices registered -> should short-circuit gracefully.
+    emit_slice_docs_command(&root).unwrap();
+    emit_slice_reports_command(&root).unwrap();
+}
+
+#[test]
+fn list_commands_handle_empty_sets_and_json() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("ListProj".into())).unwrap();
+    list_slices_command(&root, true).unwrap();
+    list_binaries_command(&root, true).unwrap();
+}
+
+#[test]
+fn add_binary_honors_skip_hash_flag() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("HashProj".into())).unwrap();
+    let bin_path = temp.path().join("nohash.bin");
+    std::fs::write(&bin_path, b"bytes").unwrap();
+    add_binary_command(&root, bin_path.to_str().unwrap(), Some("NoHash".into()), None, None, true)
+        .unwrap();
+    // JSON list should still succeed even without hash present.
+    list_binaries_command(&root, true).unwrap();
+}
+
+#[test]
+fn clean_outputs_requires_yes_and_binary_for_ritual() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("CleanProj".into())).unwrap();
+    let err = clean_outputs_command(&root, Some("BinX"), None, false, false).unwrap_err();
+    assert!(err.to_string().contains("Refusing"));
+
+    let err = clean_outputs_command(&root, None, Some("RunY"), false, true).unwrap_err();
+    assert!(err.to_string().contains("requires --binary"));
+}
+
+#[test]
+fn run_ritual_force_overwrites_existing_output() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+
+    init_project_command(&root, Some("ForceProj".into())).unwrap();
+    let bin_path = temp.path().join("binF.so");
+    std::fs::write(&bin_path, b"payload").unwrap();
+    add_binary_command(&root, bin_path.to_str().unwrap(), Some("BinF".into()), None, None, false)
+        .unwrap();
+
+    let spec_path = temp.path().join("force.yaml");
+    std::fs::write(&spec_path, "name: ForceRun\nbinary: BinF\nroots: [entry]\nmax_depth: 1\n")
+        .unwrap();
+
+    run_ritual_command(&root, spec_path.to_str().unwrap(), false).unwrap();
+    // Re-run with force to hit overwrite branch.
+    run_ritual_command(&root, spec_path.to_str().unwrap(), true).unwrap();
+}
+
+#[test]
+fn run_ritual_errors_when_output_exists_without_force() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("NoForceProj".into())).unwrap();
+    let bin_path = temp.path().join("binNF.so");
+    std::fs::write(&bin_path, b"payload").unwrap();
+    add_binary_command(&root, bin_path.to_str().unwrap(), Some("BinNF".into()), None, None, false)
+        .unwrap();
+    let spec_path = temp.path().join("noforce.yaml");
+    std::fs::write(&spec_path, "name: RunNF\nbinary: BinNF\nroots: [entry_point]\nmax_depth: 1\n")
+        .unwrap();
+    run_ritual_command(&root, spec_path.to_str().unwrap(), false).unwrap();
+    let err = run_ritual_command(&root, spec_path.to_str().unwrap(), false).unwrap_err();
+    assert!(err.to_string().contains("already exists"));
+}
+
+#[test]
+fn list_ritual_runs_handles_empty_state() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("EmptyRuns".into())).unwrap();
+    list_ritual_runs_command(&root, None, false).unwrap();
+    list_ritual_runs_command(&root, None, true).unwrap();
+}
+
+#[test]
+fn list_ritual_specs_handles_missing_directory() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("MissingSpecs".into())).unwrap();
+    let rituals_dir = ritual_core::db::ProjectLayout::new(&root).rituals_dir;
+    std::fs::remove_dir_all(&rituals_dir).unwrap();
+    list_ritual_specs_command(&root, false).unwrap();
+}
+
+#[test]
+fn list_binaries_human_when_empty() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("EmptyBins".into())).unwrap();
+    list_binaries_command(&root, false).unwrap();
+}
+
+#[test]
+fn show_ritual_run_errors_when_missing() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("ShowErrProj".into())).unwrap();
+    let err = show_ritual_run_command(&root, "NoBin", "NoRun", false).unwrap_err();
+    assert!(err.to_string().contains("not found"));
 }
