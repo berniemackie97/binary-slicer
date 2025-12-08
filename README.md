@@ -22,6 +22,7 @@ Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of na
   - `list-ritual-runs` enumerates runs discovered under `outputs/binaries` (human/JSON).
   - `show-ritual-run` prints metadata/paths for a single run (human/JSON).
   - `update-ritual-run-status` updates run status in the DB (pending/running/succeeded/failed/canceled/stubbed).
+  - `rerun-ritual` reuses an existing run’s normalized spec to create a new run under a new name.
   - `clean-outputs` safely deletes run outputs (per binary, per ritual, or all) with `--yes`.
   - Run metadata is also persisted in the project DB (binary, ritual, hashes, status, timestamps) for easy querying.
 - Tests + coverage (`cargo llvm-cov --workspace --summary-only` with gates) and local CI scripts.
@@ -89,8 +90,13 @@ binary-slicer show-ritual-run --root /path/to/workdir --binary DemoBin --ritual 
 
 # 11) Update run status in the DB
 binary-slicer update-ritual-run-status --root /path/to/workdir --binary DemoBin --ritual TelemetryRun --status succeeded
+Allowed statuses: pending, running, succeeded, failed, canceled, stubbed.
 
-# 12) Clean outputs (requires --yes; scope by binary/ritual or --all)
+# 12) Rerun an existing ritual using its normalized spec
+binary-slicer rerun-ritual --root /path/to/workdir --binary DemoBin --ritual TelemetryRun --as-name TelemetryRun2
+# add --force to overwrite if the target run directory already exists
+
+# 13) Clean outputs (requires --yes; scope by binary/ritual or --all)
 binary-slicer clean-outputs --root /path/to/workdir --binary DemoBin --yes
 binary-slicer clean-outputs --root /path/to/workdir --binary DemoBin --ritual TelemetryRun --yes
 binary-slicer clean-outputs --root /path/to/workdir --all --yes

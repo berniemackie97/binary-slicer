@@ -1,0 +1,178 @@
+use std::fs;
+use std::path::Path;
+
+use anyhow::{Context, Result};
+
+use crate::commands::{RitualRunInfo, RitualRunMetadata, RitualSpecInfo};
+
+/// Helper to print whether a directory exists.
+pub fn print_dir_status(label: &str, path: &Path) {
+    let exists = path.is_dir();
+    println!("- {label}: {} ({})", if exists { "OK" } else { "MISSING" }, path.display());
+}
+
+/// Load runs from DB (if available); does not merge disk runs.
+pub fn load_runs_from_db(
+    layout: &ritual_core::db::ProjectLayout,
+    binary_filter: Option<&str>,
+) -> Result<Vec<ritual_core::db::RitualRunRecord>> {
+    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
+        format!("Failed to read project config at {}", layout.project_config_path.display())
+    })?;
+    let config: ritual_core::db::ProjectConfig =
+        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
+
+    let config_db_path = Path::new(&config.db.path);
+    let db_path = if config_db_path.is_absolute() {
+        config_db_path.to_path_buf()
+    } else {
+        layout.root.join(config_db_path)
+    };
+    let db = ritual_core::db::ProjectDb::open(&db_path)
+        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+
+    Ok(db.list_ritual_runs(binary_filter).unwrap_or_default())
+}
+
+/// Discover ritual runs by scanning outputs/binaries/<binary>/<ritual>/.
+pub fn collect_ritual_runs_on_disk(
+    layout: &ritual_core::db::ProjectLayout,
+    binary_filter: Option<&str>,
+) -> Result<Vec<RitualRunInfo>> {
+    let mut runs = Vec::new();
+    if !layout.outputs_binaries_dir.exists() {
+        return Ok(runs);
+    }
+
+    for bin_entry in fs::read_dir(&layout.outputs_binaries_dir)
+        .with_context(|| format!("Failed to read {}", layout.outputs_binaries_dir.display()))?
+    {
+        let bin_entry = bin_entry?;
+        if !bin_entry.file_type()?.is_dir() {
+            continue;
+        }
+        let bin_name = bin_entry.file_name().to_string_lossy().to_string();
+        if let Some(filter) = binary_filter {
+            if bin_name != filter {
+                continue;
+            }
+        }
+        let bin_path = bin_entry.path();
+        for run_entry in fs::read_dir(&bin_path)
+            .with_context(|| format!("Failed to read {}", bin_path.display()))?
+        {
+            let run_entry = run_entry?;
+            if !run_entry.file_type()?.is_dir() {
+                continue;
+            }
+            let run_name = run_entry.file_name().to_string_lossy().to_string();
+            let run_path = run_entry.path();
+            let metadata_path = run_path.join("run_metadata.json");
+            let (started_at, finished_at, status, spec_hash) = if metadata_path.exists() {
+                match fs::read_to_string(&metadata_path)
+                    .ok()
+                    .and_then(|body| serde_json::from_str::<RitualRunMetadata>(&body).ok())
+                {
+                    Some(meta) => (
+                        Some(meta.started_at),
+                        Some(meta.finished_at),
+                        Some(meta.status.as_str().to_string()),
+                        Some(meta.spec_hash),
+                    ),
+                    None => (None, None, None, None),
+                }
+            } else {
+                (None, None, None, None)
+            };
+
+            runs.push(RitualRunInfo {
+                binary: bin_name.clone(),
+                name: run_name,
+                path: run_path.display().to_string(),
+                started_at,
+                finished_at,
+                status,
+                spec_hash,
+            });
+        }
+    }
+    Ok(runs)
+}
+
+/// Discover ritual specs under rituals/ (yaml/yml/json).
+pub fn collect_ritual_specs(dir: &Path) -> Result<Vec<RitualSpecInfo>> {
+    let mut specs = Vec::new();
+    for entry in fs::read_dir(dir).with_context(|| format!("Failed to read {}", dir.display()))? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let entry_path = entry.path();
+        let ext_owned =
+            entry_path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_string();
+        let ext = ext_owned.as_str();
+        if !matches!(ext, "yaml" | "yml" | "json") {
+            continue;
+        }
+        let format = ext.to_string();
+        let body = fs::read_to_string(&entry_path)
+            .with_context(|| format!("Failed to read ritual spec {}", entry_path.display()))?;
+        let (name_field, binary_field) = if format == "json" {
+            let parsed: Option<serde_json::Value> = serde_json::from_str(&body).ok();
+            let name = parsed
+                .as_ref()
+                .and_then(|v| v.get("name").and_then(|n| n.as_str()))
+                .map(|s| s.to_string());
+            let binary = parsed
+                .as_ref()
+                .and_then(|v| v.get("binary").and_then(|b| b.as_str()))
+                .map(|s| s.to_string());
+            (name, binary)
+        } else {
+            let parsed: Option<serde_yaml::Value> = serde_yaml::from_str(&body).ok();
+            let name = parsed
+                .as_ref()
+                .and_then(|v| v.get("name").and_then(|n| n.as_str()))
+                .map(|s| s.to_string());
+            let binary = parsed
+                .as_ref()
+                .and_then(|v| v.get("binary").and_then(|b| b.as_str()))
+                .map(|s| s.to_string());
+            (name, binary)
+        };
+        let name = name_field.unwrap_or_else(|| {
+            entry_path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string()
+        });
+
+        specs.push(RitualSpecInfo {
+            name,
+            binary: binary_field,
+            path: entry_path.display().to_string(),
+            format,
+        });
+    }
+
+    specs.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(specs)
+}
+
+/// Merge runs from DB and disk (disk only used to backfill missing DB runs).
+pub fn load_runs_from_db_and_disk(
+    layout: &ritual_core::db::ProjectLayout,
+    binary_filter: Option<&str>,
+) -> Result<Vec<RitualRunInfo>> {
+    let mut runs: Vec<RitualRunInfo> = load_runs_from_db(layout, binary_filter)?
+        .iter()
+        .map(|r| crate::commands::db_run_to_info(layout, r))
+        .collect();
+
+    // Merge in on-disk runs not in DB.
+    let disk_runs = collect_ritual_runs_on_disk(layout, binary_filter)?;
+    for dr in disk_runs {
+        if !runs.iter().any(|r| r.binary == dr.binary && r.name == dr.name) {
+            runs.push(dr);
+        }
+    }
+    runs.sort_by(|a, b| a.name.cmp(&b.name).then(a.binary.cmp(&b.binary)));
+    Ok(runs)
+}

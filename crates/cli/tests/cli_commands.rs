@@ -317,6 +317,80 @@ roots: [entry_point]
         .failure();
 }
 
+/// `rerun-ritual` should reuse a normalized spec and create a new run entry.
+#[test]
+fn rerun_ritual_creates_new_run_from_existing_spec() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let bin_path = root.join("libRerun.so");
+    fs::write(&bin_path, b"dummy").expect("write binary");
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("RerunBin")
+        .assert()
+        .success();
+
+    let spec_path = root.join("orig.yaml");
+    let spec_yaml = r#"name: OrigRun
+binary: RerunBin
+roots: [entry_point]
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .success();
+
+    // Rerun using existing spec, to a new name.
+    cargo_bin_cmd!("binary-slicer")
+        .arg("rerun-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--binary")
+        .arg("RerunBin")
+        .arg("--ritual")
+        .arg("OrigRun")
+        .arg("--as-name")
+        .arg("SecondRun")
+        .assert()
+        .success();
+
+    let layout = ritual_core::db::ProjectLayout::new(root);
+    let new_run_root = layout.binary_output_root("RerunBin").join("SecondRun");
+    assert!(new_run_root.join("spec.yaml").is_file());
+    assert!(new_run_root.join("report.json").is_file());
+    assert!(new_run_root.join("run_metadata.json").is_file());
+
+    // Run list should include both runs.
+    let output = cargo_bin_cmd!("binary-slicer")
+        .arg("list-ritual-runs")
+        .arg("--root")
+        .arg(root)
+        .arg("--binary")
+        .arg("RerunBin")
+        .arg("--json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let runs: Vec<serde_json::Value> = serde_json::from_slice(&output).expect("parse runs json");
+    assert_eq!(runs.len(), 2);
+}
+
 /// `add-binary` should fail when the target binary path does not exist.
 #[test]
 fn add_binary_fails_for_missing_file() {
@@ -928,6 +1002,63 @@ roots: [entry_point]
     assert!(payload["metadata"]["spec_hash"].as_str().is_some());
 }
 
+/// `show-ritual-run` should prefer DB metadata when available.
+#[test]
+fn show_ritual_run_uses_db_metadata() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let bin_path = root.join("libShowDb.so");
+    fs::write(&bin_path, b"payload").expect("write binary");
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("ShowDbBin")
+        .assert()
+        .success();
+
+    let spec_path = root.join("showdb.yaml");
+    let spec_yaml = r#"name: ShowDbRun
+binary: ShowDbBin
+roots: [entry_point]
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .success();
+
+    let output = cargo_bin_cmd!("binary-slicer")
+        .arg("show-ritual-run")
+        .arg("--root")
+        .arg(root)
+        .arg("--binary")
+        .arg("ShowDbBin")
+        .arg("--ritual")
+        .arg("ShowDbRun")
+        .arg("--json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let payload: serde_json::Value = serde_json::from_slice(&output).expect("parse show json");
+    assert_eq!(payload["metadata"]["status"], "stubbed");
+    assert_eq!(payload["binary"], "ShowDbBin");
+    assert_eq!(payload["ritual"], "ShowDbRun");
+}
+
 /// `list-ritual-specs` should report specs under rituals/.
 #[test]
 fn list_ritual_specs_reports_specs() {
@@ -1147,7 +1278,7 @@ roots: [entry_point]
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0]["binary"], "JsonBin");
     assert_eq!(runs[0]["name"], "JsonRun");
-    assert!(runs[0]["status"].as_str().is_some());
+    assert_eq!(runs[0]["status"], "stubbed");
     assert!(runs[0]["spec_hash"].as_str().is_some());
 }
 

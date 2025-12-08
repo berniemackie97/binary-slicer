@@ -20,7 +20,17 @@ This directory contains documentation and design notes for Binary Slicer.
   - `list-ritual-runs` enumerates per-binary runs (human/JSON).
   - `show-ritual-run` prints details/metadata for a single run (human/JSON).
   - `update-ritual-run-status` updates run status in the DB (pending/running/succeeded/failed/canceled/stubbed).
+  - `rerun-ritual` reuses an existing run's normalized spec to create a new run under a new name.
   - `clean-outputs` removes run outputs (scoped by binary/ritual or `--all`, requires `--yes`).
+
+**Allowed run statuses**
+
+- `pending`
+- `running`
+- `succeeded`
+- `failed`
+- `canceled`
+- `stubbed`
 - **Inspection**: `project-info`, `list-slices`, `list-binaries` (human/JSON).
 
 ## Layout (project root)

@@ -268,6 +268,31 @@ pub struct ProjectSnapshot {
     pub slices: Vec<SliceRecord>,
 }
 
+/// Allowed status values for ritual runs.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RitualRunStatus {
+    Pending,
+    Running,
+    Succeeded,
+    Failed,
+    Canceled,
+    Stubbed,
+}
+
+impl RitualRunStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RitualRunStatus::Pending => "pending",
+            RitualRunStatus::Running => "running",
+            RitualRunStatus::Succeeded => "succeeded",
+            RitualRunStatus::Failed => "failed",
+            RitualRunStatus::Canceled => "canceled",
+            RitualRunStatus::Stubbed => "stubbed",
+        }
+    }
+}
+
 /// Record describing a ritual run (analysis execution) for bookkeeping.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct RitualRunRecord {
@@ -275,9 +300,32 @@ pub struct RitualRunRecord {
     pub ritual: String,
     pub spec_hash: String,
     pub binary_hash: Option<String>,
-    pub status: String,
+    pub status: RitualRunStatus,
     pub started_at: String,
     pub finished_at: String,
+}
+
+/// Helper for parsing status strings into RitualRunStatus with better errors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RitualRunStatusString(pub RitualRunStatus);
+
+impl std::str::FromStr for RitualRunStatusString {
+    type Err = rusqlite::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let status = match s.to_lowercase().as_str() {
+            "pending" => RitualRunStatus::Pending,
+            "running" => RitualRunStatus::Running,
+            "succeeded" => RitualRunStatus::Succeeded,
+            "failed" => RitualRunStatus::Failed,
+            "canceled" => RitualRunStatus::Canceled,
+            "stubbed" => RitualRunStatus::Stubbed,
+            _other => {
+                return Err(rusqlite::Error::InvalidQuery);
+            }
+        };
+        Ok(RitualRunStatusString(status))
+    }
 }
 
 /// SQLite-backed project database.
@@ -390,7 +438,7 @@ impl ProjectDb {
                 record.ritual,
                 record.spec_hash,
                 record.binary_hash,
-                record.status,
+                record.status.as_str(),
                 record.started_at,
                 record.finished_at
             ],
@@ -406,7 +454,10 @@ impl ProjectDb {
                 ritual: row.get(1)?,
                 spec_hash: row.get(2)?,
                 binary_hash: row.get(3)?,
-                status: row.get(4)?,
+                status: {
+                    let s: String = row.get(4)?;
+                    s.parse::<RitualRunStatusString>()?.0
+                },
                 started_at: row.get(5)?,
                 finished_at: row.get(6)?,
             })

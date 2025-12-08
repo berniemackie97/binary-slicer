@@ -16,7 +16,7 @@ fn ritual_runs_insert_and_list_round_trip() {
         ritual: "Run1".into(),
         spec_hash: "specA".into(),
         binary_hash: Some("binhashA".into()),
-        status: "stubbed".into(),
+        status: ritual_core::db::RitualRunStatus::Stubbed,
         started_at: "t0".into(),
         finished_at: "t1".into(),
     };
@@ -25,7 +25,7 @@ fn ritual_runs_insert_and_list_round_trip() {
         ritual: "Run2".into(),
         spec_hash: "specB".into(),
         binary_hash: None,
-        status: "stubbed".into(),
+        status: ritual_core::db::RitualRunStatus::Stubbed,
         started_at: "t2".into(),
         finished_at: "t3".into(),
     };
@@ -47,7 +47,7 @@ fn ritual_runs_insert_and_list_round_trip() {
         .expect("update status");
     assert_eq!(updated, 1);
     let only_a_after = db.list_ritual_runs(Some("BinA")).expect("filter runs");
-    assert_eq!(only_a_after[0].status, "succeeded");
+    assert_eq!(only_a_after[0].status, ritual_core::db::RitualRunStatus::Succeeded);
     assert_eq!(only_a_after[0].finished_at, "t9");
 }
 
@@ -94,12 +94,12 @@ fn existing_schema_is_migrated_to_v2() {
         ritual: "RunX".into(),
         spec_hash: "sh".into(),
         binary_hash: None,
-        status: "ok".into(),
+        status: ritual_core::db::RitualRunStatus::Stubbed,
         started_at: "t".into(),
         finished_at: "t".into(),
     };
     db.insert_ritual_run(&run).expect("insert after migration");
     let all = db.list_ritual_runs(None).expect("list runs");
     assert_eq!(all.len(), 1);
-    assert_eq!(all[0].status, "ok");
+    assert_eq!(all[0].status, ritual_core::db::RitualRunStatus::Stubbed);
 }
