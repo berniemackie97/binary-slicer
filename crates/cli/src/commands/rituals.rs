@@ -10,7 +10,11 @@ use serde::Serialize;
 use sha2::Digest;
 
 use crate::commands::{
-    collect_ritual_specs, load_runs_from_db, load_runs_from_db_and_disk, validate_run_status,
+    collect_ritual_specs, load_runs_from_db, load_runs_from_db_and_disk, open_project_db,
+    validate_run_status,
+};
+use ritual_core::services::analysis::{
+    default_backend_registry, AnalysisOptions, AnalysisRequest, RitualRunner, RunMetadata,
 };
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -104,27 +108,12 @@ pub fn db_run_to_info(
 
 /// Run a ritual spec (stub analysis) and organize outputs per binary and ritual name.
 pub fn run_ritual_command(root: &str, file: &str, force: bool) -> Result<()> {
-    use ritual_core::db::{ProjectConfig, ProjectDb, ProjectLayout};
+    use ritual_core::db::ProjectLayout;
 
     let root_path = canonicalize_or_current(root)?;
     let layout = ProjectLayout::new(&root_path);
 
-    // Load project config.
-    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
-        format!("Failed to read project config at {}", layout.project_config_path.display())
-    })?;
-    let config: ProjectConfig =
-        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
-
-    // Resolve DB path (may be relative or absolute in config).
-    let config_db_path = Path::new(&config.db.path);
-    let db_path = if config_db_path.is_absolute() {
-        config_db_path.to_path_buf()
-    } else {
-        layout.root.join(config_db_path)
-    };
-    let db = ProjectDb::open(&db_path)
-        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+    let (config, db_path, db) = open_project_db(&layout)?;
 
     // Load ritual spec (supports YAML or JSON based on extension).
     let spec_path = Path::new(file);
@@ -193,16 +182,45 @@ pub fn run_ritual_command(root: &str, file: &str, force: bool) -> Result<()> {
         None
     };
 
-    // Stub analysis output placeholders.
+    // Invoke analysis service (validate-only backend for now).
+    let backends = default_backend_registry();
+    let backend = backends.get("validate-only").ok_or_else(|| anyhow!("Backend not found"))?;
+    let request = AnalysisRequest {
+        ritual_name: spec_copy.name.clone(),
+        binary_name: target_bin.name.clone(),
+        binary_path: binary_path.clone(),
+        roots: spec_copy.roots.clone(),
+        options: AnalysisOptions {
+            max_depth: spec_copy.max_depth,
+            include_imports: false,
+            include_strings: false,
+        },
+    };
+    let ctx = ritual_core::db::ProjectContext {
+        layout: layout.clone(),
+        config,
+        db_path: db_path.clone(),
+        db,
+    };
+    let runner = RitualRunner { ctx: &ctx, backend };
+    let run_meta = RunMetadata {
+        spec_hash: spec_hash.clone(),
+        binary_hash: binary_hash.clone(),
+        status: RitualRunStatus::Stubbed,
+    };
+    let analysis_result = runner.run(&request, &run_meta)?;
+
+    // Write report from analysis result.
     let report_path = run_output_root.join("report.json");
     let report = serde_json::json!({
         "ritual": spec_copy.name,
         "binary": target_bin.name,
         "roots": spec_copy.roots,
         "max_depth": spec_copy.max_depth,
-        "status": "stubbed",
-        "functions": [],
-        "edges": [],
+        "status": run_meta.status.as_str(),
+        "functions": analysis_result.functions,
+        "edges": analysis_result.call_edges,
+        "evidence": analysis_result.evidence,
     });
     fs::write(&report_path, serde_json::to_string_pretty(&report)?)
         .with_context(|| format!("Failed to write ritual report at {}", report_path.display()))?;
@@ -216,24 +234,11 @@ pub fn run_ritual_command(root: &str, file: &str, force: bool) -> Result<()> {
         binary_hash,
         started_at: now.clone(),
         finished_at: now,
-        status: RitualRunStatus::Stubbed,
+        status: run_meta.status,
     };
     let metadata_path = run_output_root.join("run_metadata.json");
     fs::write(&metadata_path, serde_json::to_string_pretty(&metadata)?)
         .with_context(|| format!("Failed to write run metadata at {}", metadata_path.display()))?;
-
-    // Persist run to DB.
-    let run_record = ritual_core::db::RitualRunRecord {
-        binary: metadata.binary.clone(),
-        ritual: metadata.ritual.clone(),
-        spec_hash: metadata.spec_hash.clone(),
-        binary_hash: metadata.binary_hash.clone(),
-        status: metadata.status.clone(),
-        started_at: metadata.started_at.clone(),
-        finished_at: metadata.finished_at.clone(),
-    };
-    db.insert_ritual_run(&run_record)
-        .with_context(|| format!("Failed to record ritual run in DB {}", db_path.display()))?;
 
     println!("Ran ritual (stub): {}", spec_copy.name);
     println!("  Binary: {}", target_bin.name);
@@ -251,27 +256,12 @@ pub fn rerun_ritual_command(
     as_name: &str,
     force: bool,
 ) -> Result<()> {
-    use ritual_core::db::{ProjectConfig, ProjectDb, ProjectLayout};
+    use ritual_core::db::ProjectLayout;
 
     let root_path = canonicalize_or_current(root)?;
     let layout = ProjectLayout::new(&root_path);
 
-    // Load project config.
-    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
-        format!("Failed to read project config at {}", layout.project_config_path.display())
-    })?;
-    let config: ProjectConfig =
-        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
-
-    // Resolve DB path (may be relative or absolute in config).
-    let config_db_path = Path::new(&config.db.path);
-    let db_path = if config_db_path.is_absolute() {
-        config_db_path.to_path_buf()
-    } else {
-        layout.root.join(config_db_path)
-    };
-    let db = ProjectDb::open(&db_path)
-        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+    let (config, db_path, db) = open_project_db(&layout)?;
 
     // Verify binary exists in DB.
     let binaries = db.list_binaries().context("Failed to list binaries")?;
@@ -323,20 +313,6 @@ pub fn rerun_ritual_command(
         format!("Failed to write normalized spec to {}", normalized_spec_path.display())
     })?;
 
-    // Reuse report stub.
-    let report_path = new_run_root.join("report.json");
-    let report = serde_json::json!({
-        "ritual": as_name,
-        "binary": target_bin.name,
-        "roots": spec.roots,
-        "max_depth": spec.max_depth,
-        "status": "stubbed",
-        "functions": [],
-        "edges": [],
-    });
-    fs::write(&report_path, serde_json::to_string_pretty(&report)?)
-        .with_context(|| format!("Failed to write ritual report at {}", report_path.display()))?;
-
     // Hash binary path.
     let binary_path = {
         let p = Path::new(&target_bin.path);
@@ -354,6 +330,49 @@ pub fn rerun_ritual_command(
         None
     };
 
+    // Invoke analysis service (validate-only backend for now).
+    let backends = default_backend_registry();
+    let backend = backends.get("validate-only").ok_or_else(|| anyhow!("Backend not found"))?;
+    let request = AnalysisRequest {
+        ritual_name: as_name.to_string(),
+        binary_name: target_bin.name.clone(),
+        binary_path: binary_path.clone(),
+        roots: spec.roots.clone(),
+        options: AnalysisOptions {
+            max_depth: spec.max_depth,
+            include_imports: false,
+            include_strings: false,
+        },
+    };
+    let ctx = ritual_core::db::ProjectContext {
+        layout: layout.clone(),
+        config,
+        db_path: db_path.clone(),
+        db,
+    };
+    let runner = RitualRunner { ctx: &ctx, backend };
+    let run_meta = RunMetadata {
+        spec_hash: spec_hash.clone(),
+        binary_hash: binary_hash.clone(),
+        status: RitualRunStatus::Stubbed,
+    };
+    let analysis_result = runner.run(&request, &run_meta)?;
+
+    // Write report from analysis result.
+    let report_path = new_run_root.join("report.json");
+    let report = serde_json::json!({
+        "ritual": as_name,
+        "binary": target_bin.name,
+        "roots": spec.roots,
+        "max_depth": spec.max_depth,
+        "status": run_meta.status.as_str(),
+        "functions": analysis_result.functions,
+        "edges": analysis_result.call_edges,
+        "evidence": analysis_result.evidence,
+    });
+    fs::write(&report_path, serde_json::to_string_pretty(&report)?)
+        .with_context(|| format!("Failed to write ritual report at {}", report_path.display()))?;
+
     // Write metadata for rerun.
     let now = Utc::now().to_rfc3339();
     let metadata = RitualRunMetadata {
@@ -368,17 +387,6 @@ pub fn rerun_ritual_command(
     let metadata_path = new_run_root.join("run_metadata.json");
     fs::write(&metadata_path, serde_json::to_string_pretty(&metadata)?)
         .with_context(|| format!("Failed to write run metadata at {}", metadata_path.display()))?;
-
-    let run_record = ritual_core::db::RitualRunRecord {
-        binary: metadata.binary.clone(),
-        ritual: metadata.ritual.clone(),
-        spec_hash: metadata.spec_hash.clone(),
-        binary_hash: metadata.binary_hash.clone(),
-        status: metadata.status.clone(),
-        started_at: metadata.started_at.clone(),
-        finished_at: metadata.finished_at.clone(),
-    };
-    db.insert_ritual_run(&run_record).context("Failed to record rerun in DB")?;
 
     println!("Reran ritual (stub): {} -> {}", ritual, as_name);
     println!("  Binary: {}", target_bin.name);
@@ -598,20 +606,7 @@ pub fn update_ritual_run_status_command(
     let root_path = canonicalize_or_current(root)?;
     let layout = ritual_core::db::ProjectLayout::new(&root_path);
 
-    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
-        format!("Failed to read project config at {}", layout.project_config_path.display())
-    })?;
-    let config: ritual_core::db::ProjectConfig =
-        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
-    let config_db_path = Path::new(&config.db.path);
-    let db_path = if config_db_path.is_absolute() {
-        config_db_path.to_path_buf()
-    } else {
-        layout.root.join(config_db_path)
-    };
-
-    let db = ritual_core::db::ProjectDb::open(&db_path)
-        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+    let (_config, _db_path, db) = open_project_db(&layout)?;
     let finished_val = finished_at.unwrap_or_else(|| Utc::now().to_rfc3339());
 
     let updated = db

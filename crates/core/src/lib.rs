@@ -13,6 +13,7 @@ pub mod backends;
 pub mod db;
 pub mod model;
 pub mod rituals;
+pub mod services;
 
 /// Returns the library version as encoded at compile time.
 ///

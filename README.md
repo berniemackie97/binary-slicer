@@ -26,6 +26,7 @@ Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of na
   - `clean-outputs` safely deletes run outputs (per binary, per ritual, or all) with `--yes`.
   - Run metadata is also persisted in the project DB (binary, ritual, hashes, status, timestamps) for easy querying.
 - Tests + coverage (`cargo llvm-cov --workspace --summary-only` with gates) and local CI scripts.
+- Core is modular: `ritual-core` exposes a clean DB layer (`db/config`, `db/layout`, `db/models`, `db/project_db`, `db/util`, `db/context`) so frontends can load config, resolve paths, and open the project DB via shared helpers (e.g., `open_project_db`, `ProjectContext::from_root`).
 
 Planned next milestones:
 - Ritual DSL to declare roots/boundaries and traversal rules.

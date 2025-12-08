@@ -1,6 +1,6 @@
-use std::fs;
 use std::path::Path;
 
+use crate::commands::open_project_db;
 use crate::{canonicalize_or_current, sha256_file};
 use anyhow::{anyhow, Context, Result};
 
@@ -16,24 +16,7 @@ pub fn add_binary_command(
     let root_path = canonicalize_or_current(root)?;
     let layout = ritual_core::db::ProjectLayout::new(&root_path);
 
-    // Load project config so we know where the DB lives.
-    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
-        format!("Failed to read project config at {}", layout.project_config_path.display())
-    })?;
-
-    let config: ritual_core::db::ProjectConfig =
-        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
-
-    // Resolve DB path (may be relative or absolute in config).
-    let config_db_path = Path::new(&config.db.path);
-    let db_path = if config_db_path.is_absolute() {
-        config_db_path.to_path_buf()
-    } else {
-        layout.root.join(config_db_path)
-    };
-
-    let db = ritual_core::db::ProjectDb::open(&db_path)
-        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+    let (_config, db_path, db) = open_project_db(&layout)?;
 
     // Normalize the binary path.
     let input_path = Path::new(path);
@@ -91,25 +74,7 @@ pub fn list_binaries_command(root: &str, json: bool) -> Result<()> {
     let root_path = canonicalize_or_current(root)?;
     let layout = ritual_core::db::ProjectLayout::new(&root_path);
 
-    // Load project config so we know where the DB lives.
-    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
-        format!("Failed to read project config at {}", layout.project_config_path.display())
-    })?;
-
-    let config: ritual_core::db::ProjectConfig =
-        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
-
-    // Resolve DB path (may be relative or absolute in config).
-    let config_db_path = Path::new(&config.db.path);
-    let db_path = if config_db_path.is_absolute() {
-        config_db_path.to_path_buf()
-    } else {
-        layout.root.join(config_db_path)
-    };
-
-    // Load DB metadata.
-    let db = ritual_core::db::ProjectDb::open(&db_path)
-        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+    let (_config, _db_path, db) = open_project_db(&layout)?;
     let binaries = db.list_binaries().context("Failed to list binaries")?;
 
     if json {

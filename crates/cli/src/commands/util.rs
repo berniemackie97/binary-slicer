@@ -5,6 +5,20 @@ use anyhow::{Context, Result};
 
 use crate::commands::{RitualRunInfo, RitualRunMetadata, RitualSpecInfo};
 
+/// Load the project config JSON from disk (delegates to core helper).
+pub fn load_project_config(
+    layout: &ritual_core::db::ProjectLayout,
+) -> Result<ritual_core::db::ProjectConfig> {
+    ritual_core::db::load_project_config(layout)
+}
+
+/// Resolve the DB path (respecting relative/absolute config) and open a ProjectDb (delegates to core helper).
+pub fn open_project_db(
+    layout: &ritual_core::db::ProjectLayout,
+) -> Result<(ritual_core::db::ProjectConfig, std::path::PathBuf, ritual_core::db::ProjectDb)> {
+    ritual_core::db::open_project_db(layout)
+}
+
 /// Helper to print whether a directory exists.
 pub fn print_dir_status(label: &str, path: &Path) {
     let exists = path.is_dir();
@@ -16,21 +30,7 @@ pub fn load_runs_from_db(
     layout: &ritual_core::db::ProjectLayout,
     binary_filter: Option<&str>,
 ) -> Result<Vec<ritual_core::db::RitualRunRecord>> {
-    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
-        format!("Failed to read project config at {}", layout.project_config_path.display())
-    })?;
-    let config: ritual_core::db::ProjectConfig =
-        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
-
-    let config_db_path = Path::new(&config.db.path);
-    let db_path = if config_db_path.is_absolute() {
-        config_db_path.to_path_buf()
-    } else {
-        layout.root.join(config_db_path)
-    };
-    let db = ritual_core::db::ProjectDb::open(&db_path)
-        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
-
+    let (_config, _db_path, db) = open_project_db(layout)?;
     Ok(db.list_ritual_runs(binary_filter).unwrap_or_default())
 }
 
