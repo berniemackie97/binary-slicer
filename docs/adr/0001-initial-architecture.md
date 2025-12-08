@@ -33,11 +33,13 @@ We will implement Binary Slicer as:
      - Project database layer (SQLite).
    - `binary-slicer` - binary crate providing:
      - Command-line interface for running rituals and managing projects.
-     - Export of Markdown/JSON/Graphviz artifacts.
+     - Export/regeneration of Markdown/JSON/Graphviz artifacts.
+     - Per-binary/per-ritual output layout under `outputs/binaries/<binary>/<ritual>/`.
 
 2. A documentation structure with:
    - `docs/adr/` for architecture decision records.
    - Generated `docs/slices/<slice>.md` for slice-level outputs.
+   - `reports/` for JSON exports; `graphs/` for DOT/Graphviz; `rituals/` for specs; `outputs/` for per-run artifacts.
 
 3. A CI pipeline that:
    - Builds all workspace crates.
@@ -49,3 +51,4 @@ We will implement Binary Slicer as:
 - The CLI stays thin and simple, focusing on IO and UX rather than analysis logic.
 - Integrations with external tools (IDA, Ghidra, rizin) will be funneled through `backends` in `ritual-core`.
 - Adding new slices, rituals, or backends should not require modifying the CLI beyond wiring new subcommands.
+- A stable on-disk layout (docs/reports/graphs/rituals/outputs) allows automation, CI verification, and future UI/API layers to consume artifacts consistently.

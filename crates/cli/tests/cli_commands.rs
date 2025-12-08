@@ -566,6 +566,236 @@ fn run_ritual_accepts_json_spec() {
     assert!(run_root.join("report.json").is_file());
 }
 
+/// `run-ritual` should fail when an output dir exists unless --force is used.
+#[test]
+fn run_ritual_force_overwrites_existing_run() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let bin_path = root.join("libForce.so");
+    fs::write(&bin_path, b"dummy").expect("write binary");
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("ForceBin")
+        .assert()
+        .success();
+
+    let spec_path = root.join("force.yaml");
+    let spec_yaml = r#"name: ForceRun
+binary: ForceBin
+roots: [entry_point]
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    // First run succeeds.
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .success();
+
+    // Second run without force should fail.
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .failure();
+
+    // Third run with --force should overwrite.
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .arg("--force")
+        .assert()
+        .success();
+}
+
+/// `run-ritual` should emit run_metadata.json with hashes and timestamps.
+#[test]
+fn run_ritual_writes_metadata_with_hashes() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let bin_path = root.join("libMeta.so");
+    fs::write(&bin_path, b"payload").expect("write binary");
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("MetaBin")
+        .assert()
+        .success();
+
+    let spec_path = root.join("meta.yaml");
+    let spec_yaml = r#"name: MetaRun
+binary: MetaBin
+roots: [entry_point]
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .success();
+
+    let layout = ritual_core::db::ProjectLayout::new(root);
+    let run_root = layout.binary_output_root("MetaBin").join("MetaRun");
+    let metadata_path = run_root.join("run_metadata.json");
+    let contents = fs::read_to_string(&metadata_path).expect("read run metadata");
+    let meta: serde_json::Value = serde_json::from_str(&contents).expect("parse metadata");
+
+    // Check hashes and timestamps exist.
+    let mut hasher = Sha256::new();
+    hasher.update(spec_yaml.as_bytes());
+    let expected_spec_hash = format!("{:x}", hasher.finalize());
+    assert_eq!(meta["spec_hash"], expected_spec_hash);
+    assert_eq!(meta["binary"], "MetaBin");
+    assert_eq!(meta["ritual"], "MetaRun");
+    assert!(meta["binary_hash"].as_str().is_some());
+    assert!(meta["started_at"].as_str().is_some());
+    assert!(meta["finished_at"].as_str().is_some());
+}
+
+/// `show-ritual-run` should print metadata and support JSON.
+#[test]
+fn show_ritual_run_reports_metadata() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let bin_path = root.join("libShow.so");
+    fs::write(&bin_path, b"payload").expect("write binary");
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("ShowBin")
+        .assert()
+        .success();
+
+    let spec_path = root.join("show.yaml");
+    let spec_yaml = r#"name: ShowRun
+binary: ShowBin
+roots: [entry_point]
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .success();
+
+    // Human output
+    cargo_bin_cmd!("binary-slicer")
+        .arg("show-ritual-run")
+        .arg("--root")
+        .arg(root)
+        .arg("--binary")
+        .arg("ShowBin")
+        .arg("--ritual")
+        .arg("ShowRun")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ShowBin"))
+        .stdout(predicate::str::contains("ShowRun"))
+        .stdout(predicate::str::contains("run_metadata.json").not()); // we don't print the filename literally
+
+    // JSON output
+    let output = cargo_bin_cmd!("binary-slicer")
+        .arg("show-ritual-run")
+        .arg("--root")
+        .arg(root)
+        .arg("--binary")
+        .arg("ShowBin")
+        .arg("--ritual")
+        .arg("ShowRun")
+        .arg("--json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let payload: serde_json::Value =
+        serde_json::from_slice(&output).expect("parse show-ritual-run json");
+    assert_eq!(payload["binary"], "ShowBin");
+    assert_eq!(payload["ritual"], "ShowRun");
+    assert!(payload["metadata"]["spec_hash"].as_str().is_some());
+}
+
+/// `list-ritual-specs` should report specs under rituals/.
+#[test]
+fn list_ritual_specs_reports_specs() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let rituals_dir = ritual_core::db::ProjectLayout::new(root).rituals_dir;
+    let spec_path = rituals_dir.join("listed.yaml");
+    let spec_yaml = r#"name: ListedRun
+binary: ListedBin
+roots: [main]
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("list-ritual-specs")
+        .arg("--root")
+        .arg(root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ListedRun"))
+        .stdout(predicate::str::contains("ListedBin"));
+
+    let output = cargo_bin_cmd!("binary-slicer")
+        .arg("list-ritual-specs")
+        .arg("--root")
+        .arg(root)
+        .arg("--json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let specs: Vec<serde_json::Value> = serde_json::from_slice(&output).expect("parse specs json");
+    assert_eq!(specs.len(), 1);
+    assert_eq!(specs[0]["name"], "ListedRun");
+    assert_eq!(specs[0]["binary"], "ListedBin");
+}
+
 /// `run-ritual` should fail validation when roots are missing.
 #[test]
 fn run_ritual_rejects_missing_roots() {
@@ -627,6 +857,137 @@ roots: [root_fn]
         .arg(&spec_path)
         .assert()
         .failure();
+}
+
+/// `list-ritual-runs` should enumerate runs under outputs/binaries.
+#[test]
+fn list_ritual_runs_reports_runs() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let bin_path = root.join("libList.so");
+    fs::write(&bin_path, b"dummy").expect("write binary");
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("ListBin")
+        .assert()
+        .success();
+
+    let spec_path = root.join("list.yaml");
+    let spec_yaml = r#"name: ListRun
+binary: ListBin
+roots: [start]
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .success();
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("list-ritual-runs")
+        .arg("--root")
+        .arg(root)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ListBin"))
+        .stdout(predicate::str::contains("ListRun"));
+
+    let output = cargo_bin_cmd!("binary-slicer")
+        .arg("list-ritual-runs")
+        .arg("--root")
+        .arg(root)
+        .arg("--json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let runs: Vec<serde_json::Value> = serde_json::from_slice(&output).expect("parse runs json");
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0]["binary"], "ListBin");
+    assert_eq!(runs[0]["name"], "ListRun");
+}
+
+/// `clean-outputs` should refuse without --yes and delete scoped outputs with it.
+#[test]
+fn clean_outputs_requires_confirmation_and_scopes() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    // Create two binaries and runs.
+    for (name, spec_name) in [("BinA", "RunA"), ("BinB", "RunB")] {
+        let bin_path = root.join(format!("{name}.so"));
+        fs::write(&bin_path, b"dummy").expect("write binary");
+        cargo_bin_cmd!("binary-slicer")
+            .arg("add-binary")
+            .arg("--root")
+            .arg(root)
+            .arg("--path")
+            .arg(&bin_path)
+            .arg("--name")
+            .arg(name)
+            .assert()
+            .success();
+        let spec_path = root.join(format!("{spec_name}.yaml"));
+        let spec_yaml = format!(
+            "name: {spec_name}\nbinary: {name}\nroots: [entry_point]\n",
+            spec_name = spec_name,
+            name = name
+        );
+        fs::write(&spec_path, spec_yaml).expect("write spec");
+        cargo_bin_cmd!("binary-slicer")
+            .arg("run-ritual")
+            .arg("--root")
+            .arg(root)
+            .arg("--file")
+            .arg(&spec_path)
+            .assert()
+            .success();
+    }
+
+    let layout = ritual_core::db::ProjectLayout::new(root);
+    let bin_a_run = layout.binary_output_root("BinA").join("RunA");
+    let bin_b_run = layout.binary_output_root("BinB").join("RunB");
+    assert!(bin_a_run.is_dir());
+    assert!(bin_b_run.is_dir());
+
+    // Without --yes should fail fast.
+    cargo_bin_cmd!("binary-slicer")
+        .arg("clean-outputs")
+        .arg("--root")
+        .arg(root)
+        .arg("--binary")
+        .arg("BinA")
+        .assert()
+        .failure();
+
+    // With --yes should delete BinA/RunA only.
+    cargo_bin_cmd!("binary-slicer")
+        .arg("clean-outputs")
+        .arg("--root")
+        .arg(root)
+        .arg("--binary")
+        .arg("BinA")
+        .arg("--yes")
+        .assert()
+        .success();
+    assert!(!bin_a_run.exists());
+    assert!(bin_b_run.exists());
 }
 
 /// `add-binary` should accept a precomputed hash and skip hashing when requested.

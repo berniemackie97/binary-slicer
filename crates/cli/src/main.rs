@@ -3,9 +3,11 @@ use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
 use binary_slicer::{canonicalize_or_current, infer_project_name, sha256_file};
+use chrono::Utc;
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
 use serde::Serialize;
+use sha2::Digest;
 
 /// Slice-oriented reverse-engineering assistant CLI.
 ///
@@ -160,6 +162,78 @@ enum Command {
         /// Path to the ritual spec (YAML/JSON).
         #[arg(long)]
         file: String,
+
+        /// Overwrite an existing ritual run output directory if present.
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
+
+    /// Clean ritual outputs under `outputs/binaries` with safety guardrails.
+    CleanOutputs {
+        /// Project root directory. Defaults to the current working directory.
+        #[arg(long, default_value = ".")]
+        root: String,
+
+        /// Binary name to clean (required unless --all is set).
+        #[arg(long)]
+        binary: Option<String>,
+
+        /// Specific ritual run to clean (requires --binary).
+        #[arg(long)]
+        ritual: Option<String>,
+
+        /// Clean all outputs/binaries (dangerous; requires --yes).
+        #[arg(long, default_value_t = false)]
+        all: bool,
+
+        /// Required confirmation flag to avoid accidental deletion.
+        #[arg(long, default_value_t = false)]
+        yes: bool,
+    },
+
+    /// List ritual runs discovered under outputs/binaries (human or JSON).
+    ListRitualRuns {
+        /// Project root directory. Defaults to the current working directory.
+        #[arg(long, default_value = ".")]
+        root: String,
+
+        /// Optional binary name to filter runs.
+        #[arg(long)]
+        binary: Option<String>,
+
+        /// Emit JSON instead of human-readable text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+
+    /// Show details for a ritual run (metadata + paths).
+    ShowRitualRun {
+        /// Project root directory. Defaults to the current working directory.
+        #[arg(long, default_value = ".")]
+        root: String,
+
+        /// Binary name (required).
+        #[arg(long)]
+        binary: String,
+
+        /// Ritual name (required).
+        #[arg(long)]
+        ritual: String,
+
+        /// Emit JSON instead of human-readable text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
+
+    /// List ritual specs discovered under `rituals/` (human or JSON).
+    ListRitualSpecs {
+        /// Project root directory. Defaults to the current working directory.
+        #[arg(long, default_value = ".")]
+        root: String,
+
+        /// Emit JSON instead of human-readable text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
 }
 
@@ -181,7 +255,17 @@ fn main() -> Result<()> {
         Command::ListBinaries { root, json } => list_binaries_command(&root, json)?,
         Command::EmitSliceDocs { root } => emit_slice_docs_command(&root)?,
         Command::EmitSliceReports { root } => emit_slice_reports_command(&root)?,
-        Command::RunRitual { root, file } => run_ritual_command(&root, &file)?,
+        Command::RunRitual { root, file, force } => run_ritual_command(&root, &file, force)?,
+        Command::CleanOutputs { root, binary, ritual, all, yes } => {
+            clean_outputs_command(&root, binary.as_deref(), ritual.as_deref(), all, yes)?
+        }
+        Command::ListRitualRuns { root, binary, json } => {
+            list_ritual_runs_command(&root, binary.as_deref(), json)?
+        }
+        Command::ShowRitualRun { root, binary, ritual, json } => {
+            show_ritual_run_command(&root, &binary, &ritual, json)?
+        }
+        Command::ListRitualSpecs { root, json } => list_ritual_specs_command(&root, json)?,
     }
 
     Ok(())
@@ -280,6 +364,7 @@ struct ProjectInfoSnapshot {
     layout: ProjectInfoLayout,
     binaries: Vec<ritual_core::db::BinaryRecord>,
     slices: Vec<ritual_core::db::SliceRecord>,
+    ritual_runs: Vec<RitualRunInfo>,
 }
 
 #[derive(Serialize)]
@@ -291,6 +376,25 @@ struct ProjectInfoLayout {
     graphs_dir: String,
     rituals_dir: String,
     outputs_dir: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct RitualRunInfo {
+    binary: String,
+    name: String,
+    path: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+    status: Option<String>,
+    spec_hash: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct RitualSpecInfo {
+    name: String,
+    binary: Option<String>,
+    path: String,
+    format: String,
 }
 
 /// Show basic information about an existing project.
@@ -319,6 +423,7 @@ fn project_info_command(root: &str, json: bool) -> Result<()> {
         .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
     let binaries = db.list_binaries().context("Failed to list binaries")?;
     let slices = db.list_slices().context("Failed to list slices")?;
+    let ritual_runs = collect_ritual_runs(&layout, None)?;
 
     if json {
         let snapshot = ProjectInfoSnapshot {
@@ -338,6 +443,7 @@ fn project_info_command(root: &str, json: bool) -> Result<()> {
             },
             binaries,
             slices,
+            ritual_runs,
         };
         let serialized = serde_json::to_string_pretty(&snapshot)?;
         println!("{}", serialized);
@@ -361,6 +467,9 @@ fn project_info_command(root: &str, json: bool) -> Result<()> {
     print_dir_status("Reports dir", &layout.reports_dir);
     print_dir_status("Graphs dir", &layout.graphs_dir);
     print_dir_status("Rituals dir", &layout.rituals_dir);
+    print_dir_status("Outputs dir", &layout.outputs_dir);
+    println!();
+    println!("Ritual runs: {}", ritual_runs.len());
 
     Ok(())
 }
@@ -729,7 +838,7 @@ fn emit_slice_reports_command(root: &str) -> Result<()> {
 }
 
 /// Run a ritual spec (stub analysis) and organize outputs per binary and ritual name.
-fn run_ritual_command(root: &str, file: &str) -> Result<()> {
+fn run_ritual_command(root: &str, file: &str, force: bool) -> Result<()> {
     use ritual_core::db::{ProjectConfig, ProjectDb, ProjectLayout};
 
     let root_path = canonicalize_or_current(root)?;
@@ -754,12 +863,13 @@ fn run_ritual_command(root: &str, file: &str) -> Result<()> {
 
     // Load ritual spec (supports YAML or JSON based on extension).
     let spec_path = Path::new(file);
-    let spec_file = fs::File::open(spec_path)
-        .with_context(|| format!("Failed to open ritual spec at {}", spec_path.display()))?;
+    let spec_bytes = fs::read(spec_path)
+        .with_context(|| format!("Failed to read ritual spec at {}", spec_path.display()))?;
+    let spec_hash = sha256_bytes(&spec_bytes);
     let spec: RitualSpec = if spec_path.extension().and_then(|e| e.to_str()) == Some("json") {
-        serde_json::from_reader(spec_file).context("Failed to parse ritual spec JSON")?
+        serde_json::from_slice(&spec_bytes).context("Failed to parse ritual spec JSON")?
     } else {
-        serde_yaml::from_reader(spec_file).context("Failed to parse ritual spec YAML")?
+        serde_yaml::from_slice(&spec_bytes).context("Failed to parse ritual spec YAML")?
     };
     spec.validate()?;
 
@@ -774,6 +884,18 @@ fn run_ritual_command(root: &str, file: &str) -> Result<()> {
     // Prepare output directories.
     let bin_output_root = layout.binary_output_root(&target_bin.name);
     let run_output_root = bin_output_root.join(&spec.name);
+    if run_output_root.exists() {
+        if force {
+            fs::remove_dir_all(&run_output_root).with_context(|| {
+                format!("Failed to clean existing ritual output dir {}", run_output_root.display())
+            })?;
+        } else {
+            return Err(anyhow!(
+                "Ritual output already exists at {} (rerun with --force to overwrite)",
+                run_output_root.display()
+            ));
+        }
+    }
     fs::create_dir_all(&run_output_root).with_context(|| {
         format!("Failed to create ritual output dir {}", run_output_root.display())
     })?;
@@ -789,6 +911,23 @@ fn run_ritual_command(root: &str, file: &str) -> Result<()> {
         format!("Failed to write normalized spec to {}", normalized_spec_path.display())
     })?;
 
+    // Resolve binary hash (prefer stored hash; compute if missing).
+    let binary_path = {
+        let p = Path::new(&target_bin.path);
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            root_path.join(p)
+        }
+    };
+    let binary_hash = if let Some(h) = &target_bin.hash {
+        Some(h.clone())
+    } else if binary_path.exists() {
+        Some(sha256_file(&binary_path)?)
+    } else {
+        None
+    };
+
     // Stub analysis output placeholders.
     let report_path = run_output_root.join("report.json");
     let report = serde_json::json!({
@@ -803,12 +942,313 @@ fn run_ritual_command(root: &str, file: &str) -> Result<()> {
     fs::write(&report_path, serde_json::to_string_pretty(&report)?)
         .with_context(|| format!("Failed to write ritual report at {}", report_path.display()))?;
 
+    // Write run metadata.
+    let now = Utc::now().to_rfc3339();
+    let metadata = RitualRunMetadata {
+        ritual: spec_copy.name.clone(),
+        binary: target_bin.name.clone(),
+        spec_hash,
+        binary_hash,
+        started_at: now.clone(),
+        finished_at: now,
+        status: "stubbed".to_string(),
+    };
+    let metadata_path = run_output_root.join("run_metadata.json");
+    fs::write(&metadata_path, serde_json::to_string_pretty(&metadata)?)
+        .with_context(|| format!("Failed to write run metadata at {}", metadata_path.display()))?;
+
     println!("Ran ritual (stub): {}", spec_copy.name);
     println!("  Binary: {}", target_bin.name);
     println!("  Roots: {:?}", spec_copy.roots);
     println!("  Output: {}", run_output_root.display());
 
     Ok(())
+}
+
+/// Clean ritual outputs (per binary or per run) with confirmation gating.
+fn clean_outputs_command(
+    root: &str,
+    binary: Option<&str>,
+    ritual: Option<&str>,
+    all: bool,
+    yes: bool,
+) -> Result<()> {
+    let root_path = canonicalize_or_current(root)?;
+    let layout = ritual_core::db::ProjectLayout::new(&root_path);
+
+    if !yes {
+        return Err(anyhow!("Refusing to delete outputs without --yes"));
+    }
+
+    if ritual.is_some() && binary.is_none() {
+        return Err(anyhow!("--ritual requires --binary"));
+    }
+
+    if !all && binary.is_none() {
+        return Err(anyhow!("Specify --binary or use --all to clean all outputs"));
+    }
+
+    let target_paths: Vec<(String, std::path::PathBuf)> = if all {
+        vec![("all outputs".to_string(), layout.outputs_binaries_dir.clone())]
+    } else if let Some(bin) = binary {
+        let bin_root = layout.binary_output_root(bin);
+        if let Some(rit) = ritual {
+            vec![(format!("{} / {}", bin, rit), bin_root.join(rit))]
+        } else {
+            vec![(bin.to_string(), bin_root)]
+        }
+    } else {
+        vec![]
+    };
+
+    for (label, path) in target_paths {
+        if path.exists() {
+            fs::remove_dir_all(&path)
+                .with_context(|| format!("Failed to remove outputs for {}", label))?;
+            println!("Removed outputs: {}", path.display());
+        } else {
+            println!("Nothing to remove for {} ({} not found)", label, path.display());
+        }
+    }
+
+    Ok(())
+}
+
+/// List ritual runs discovered under outputs/binaries.
+fn list_ritual_runs_command(root: &str, binary_filter: Option<&str>, json: bool) -> Result<()> {
+    let root_path = canonicalize_or_current(root)?;
+    let layout = ritual_core::db::ProjectLayout::new(&root_path);
+
+    let runs = collect_ritual_runs(&layout, binary_filter)?;
+
+    if json {
+        let serialized = serde_json::to_string_pretty(&runs)?;
+        println!("{}", serialized);
+        return Ok(());
+    }
+
+    if runs.is_empty() {
+        println!("Ritual runs: (none)");
+        return Ok(());
+    }
+
+    println!("Ritual runs:");
+    for run in runs {
+        println!("- {} / {} -> {}", run.binary, run.name, run.path);
+    }
+    Ok(())
+}
+
+/// Show details for a single ritual run.
+fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: bool) -> Result<()> {
+    let root_path = canonicalize_or_current(root)?;
+    let layout = ritual_core::db::ProjectLayout::new(&root_path);
+    let run_root = layout.binary_output_root(binary).join(ritual);
+    if !run_root.is_dir() {
+        return Err(anyhow!("Ritual run not found at {}", run_root.display()));
+    }
+
+    let spec_path = run_root.join("spec.yaml");
+    let report_path = run_root.join("report.json");
+    let metadata_path = run_root.join("run_metadata.json");
+    let metadata: Option<RitualRunMetadata> = if metadata_path.exists() {
+        Some(
+            serde_json::from_str(
+                &fs::read_to_string(&metadata_path)
+                    .with_context(|| format!("Failed to read {}", metadata_path.display()))?,
+            )
+            .with_context(|| format!("Failed to parse {}", metadata_path.display()))?,
+        )
+    } else {
+        None
+    };
+
+    if json {
+        let payload = serde_json::json!({
+            "binary": binary,
+            "ritual": ritual,
+            "path": run_root.display().to_string(),
+            "spec": spec_path.display().to_string(),
+            "report": report_path.display().to_string(),
+            "metadata": metadata,
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("Ritual run");
+    println!("  Binary: {}", binary);
+    println!("  Ritual: {}", ritual);
+    println!("  Path:   {}", run_root.display());
+    println!("  Spec:   {}", spec_path.display());
+    println!("  Report: {}", report_path.display());
+    if let Some(meta) = metadata {
+        println!("  Status: {}", meta.status);
+        if let Some(bh) = meta.binary_hash {
+            println!("  Binary hash: {}", bh);
+        }
+        println!("  Spec hash: {}", meta.spec_hash);
+        println!("  Started:  {}", meta.started_at);
+        println!("  Finished: {}", meta.finished_at);
+    } else {
+        println!("  (No run_metadata.json found)");
+    }
+
+    Ok(())
+}
+
+/// List ritual specs under rituals/ (yaml/yml/json).
+fn list_ritual_specs_command(root: &str, json: bool) -> Result<()> {
+    let root_path = canonicalize_or_current(root)?;
+    let layout = ritual_core::db::ProjectLayout::new(&root_path);
+    let dir = &layout.rituals_dir;
+    if !dir.exists() {
+        println!("Rituals dir missing at {}", dir.display());
+        return Ok(());
+    }
+
+    let specs = collect_ritual_specs(dir)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&specs)?);
+        return Ok(());
+    }
+
+    if specs.is_empty() {
+        println!("Ritual specs: (none)");
+        return Ok(());
+    }
+
+    println!("Ritual specs:");
+    for spec in specs {
+        let binary_display = spec.binary.as_deref().unwrap_or("(unspecified)");
+        println!(
+            "- {} (binary: {}, format: {}, path: {})",
+            spec.name, binary_display, spec.format, spec.path
+        );
+    }
+    Ok(())
+}
+
+/// Discover ritual runs by scanning outputs/binaries/<binary>/<ritual>/.
+fn collect_ritual_runs(
+    layout: &ritual_core::db::ProjectLayout,
+    binary_filter: Option<&str>,
+) -> Result<Vec<RitualRunInfo>> {
+    let mut runs = Vec::new();
+    if !layout.outputs_binaries_dir.exists() {
+        return Ok(runs);
+    }
+
+    for bin_entry in fs::read_dir(&layout.outputs_binaries_dir)
+        .with_context(|| format!("Failed to read {}", layout.outputs_binaries_dir.display()))?
+    {
+        let bin_entry = bin_entry?;
+        if !bin_entry.file_type()?.is_dir() {
+            continue;
+        }
+        let bin_name = bin_entry.file_name().to_string_lossy().to_string();
+        if let Some(filter) = binary_filter {
+            if bin_name != filter {
+                continue;
+            }
+        }
+        let bin_path = bin_entry.path();
+        for run_entry in fs::read_dir(&bin_path)
+            .with_context(|| format!("Failed to read {}", bin_path.display()))?
+        {
+            let run_entry = run_entry?;
+            if !run_entry.file_type()?.is_dir() {
+                continue;
+            }
+            let run_name = run_entry.file_name().to_string_lossy().to_string();
+            let run_path = run_entry.path();
+            let metadata_path = run_path.join("run_metadata.json");
+            let (started_at, finished_at, status, spec_hash) = if metadata_path.exists() {
+                match fs::read_to_string(&metadata_path)
+                    .ok()
+                    .and_then(|body| serde_json::from_str::<RitualRunMetadata>(&body).ok())
+                {
+                    Some(meta) => (
+                        Some(meta.started_at),
+                        Some(meta.finished_at),
+                        Some(meta.status),
+                        Some(meta.spec_hash),
+                    ),
+                    None => (None, None, None, None),
+                }
+            } else {
+                (None, None, None, None)
+            };
+
+            runs.push(RitualRunInfo {
+                binary: bin_name.clone(),
+                name: run_name,
+                path: run_path.display().to_string(),
+                started_at,
+                finished_at,
+                status,
+                spec_hash,
+            });
+        }
+    }
+    Ok(runs)
+}
+
+fn collect_ritual_specs(dir: &Path) -> Result<Vec<RitualSpecInfo>> {
+    let mut specs = Vec::new();
+    for entry in fs::read_dir(dir).with_context(|| format!("Failed to read {}", dir.display()))? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let entry_path = entry.path();
+        let ext_owned =
+            entry_path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_string();
+        let ext = ext_owned.as_str();
+        if !matches!(ext, "yaml" | "yml" | "json") {
+            continue;
+        }
+        let format = ext.to_string();
+        let body = fs::read_to_string(&entry_path)
+            .with_context(|| format!("Failed to read ritual spec {}", entry_path.display()))?;
+        let (name_field, binary_field) = if format == "json" {
+            let parsed: Option<serde_json::Value> = serde_json::from_str(&body).ok();
+            let name = parsed
+                .as_ref()
+                .and_then(|v| v.get("name").and_then(|n| n.as_str()))
+                .map(|s| s.to_string());
+            let binary = parsed
+                .as_ref()
+                .and_then(|v| v.get("binary").and_then(|b| b.as_str()))
+                .map(|s| s.to_string());
+            (name, binary)
+        } else {
+            let parsed: Option<serde_yaml::Value> = serde_yaml::from_str(&body).ok();
+            let name = parsed
+                .as_ref()
+                .and_then(|v| v.get("name").and_then(|n| n.as_str()))
+                .map(|s| s.to_string());
+            let binary = parsed
+                .as_ref()
+                .and_then(|v| v.get("binary").and_then(|b| b.as_str()))
+                .map(|s| s.to_string());
+            (name, binary)
+        };
+        let name = name_field.unwrap_or_else(|| {
+            entry_path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string()
+        });
+
+        specs.push(RitualSpecInfo {
+            name,
+            binary: binary_field,
+            path: entry_path.display().to_string(),
+            format,
+        });
+    }
+
+    specs.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(specs)
 }
 
 /// Helper to print whether a directory exists.
@@ -839,6 +1279,17 @@ struct RitualOutputs {
     docs: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct RitualRunMetadata {
+    ritual: String,
+    binary: String,
+    spec_hash: String,
+    binary_hash: Option<String>,
+    started_at: String,
+    finished_at: String,
+    status: String,
+}
+
 impl RitualSpec {
     fn validate(&self) -> Result<()> {
         if self.name.trim().is_empty() {
@@ -852,4 +1303,10 @@ impl RitualSpec {
         }
         Ok(())
     }
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
 }
