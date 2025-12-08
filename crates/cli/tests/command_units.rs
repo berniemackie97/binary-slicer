@@ -30,6 +30,7 @@ fn ritual_spec_validation_rejects_missing_fields() {
         binary: "".to_string(),
         roots: vec![],
         max_depth: None,
+        backend: None,
         description: None,
         outputs: None,
     };
@@ -52,6 +53,7 @@ fn run_metadata_round_trips_json() {
         binary: "Bin".into(),
         spec_hash: "123".into(),
         binary_hash: Some("456".into()),
+        backend: "validate-only".into(),
         started_at: "now".into(),
         finished_at: "later".into(),
         status: RitualRunStatus::Succeeded,
@@ -104,6 +106,7 @@ fn collect_ritual_runs_on_disk_reads_metadata() {
         binary: "TestBin".into(),
         spec_hash: "abc".into(),
         binary_hash: Some("def".into()),
+        backend: "validate-only".into(),
         started_at: "s".into(),
         finished_at: "f".into(),
         status: ritual_core::db::RitualRunStatus::Stubbed,
@@ -168,7 +171,7 @@ fn direct_ritual_commands_execute_and_update_status() {
     let spec_path = temp.path().join("rit.yaml");
     std::fs::write(&spec_path, "name: RunOne\nbinary: BinR\nroots: [entry_point]\nmax_depth: 1\n")
         .unwrap();
-    run_ritual_command(&root, spec_path.to_str().unwrap(), false).unwrap();
+    run_ritual_command(&root, spec_path.to_str().unwrap(), None, false).unwrap();
 
     // list & show runs/specs
     list_ritual_runs_command(&root, Some("BinR"), true).unwrap();
@@ -176,7 +179,7 @@ fn direct_ritual_commands_execute_and_update_status() {
     show_ritual_run_command(&root, "BinR", "RunOne", true).unwrap();
 
     // rerun and update status
-    rerun_ritual_command(&root, "BinR", "RunOne", "RunTwo", true).unwrap();
+    rerun_ritual_command(&root, "BinR", "RunOne", "RunTwo", None, true).unwrap();
     update_ritual_run_status_command(&root, "BinR", "RunTwo", "succeeded", None).unwrap();
 
     // clean outputs
@@ -242,9 +245,9 @@ fn run_ritual_force_overwrites_existing_output() {
     std::fs::write(&spec_path, "name: ForceRun\nbinary: BinF\nroots: [entry]\nmax_depth: 1\n")
         .unwrap();
 
-    run_ritual_command(&root, spec_path.to_str().unwrap(), false).unwrap();
+    run_ritual_command(&root, spec_path.to_str().unwrap(), None, false).unwrap();
     // Re-run with force to hit overwrite branch.
-    run_ritual_command(&root, spec_path.to_str().unwrap(), true).unwrap();
+    run_ritual_command(&root, spec_path.to_str().unwrap(), None, true).unwrap();
 }
 
 #[test]
@@ -259,9 +262,32 @@ fn run_ritual_errors_when_output_exists_without_force() {
     let spec_path = temp.path().join("noforce.yaml");
     std::fs::write(&spec_path, "name: RunNF\nbinary: BinNF\nroots: [entry_point]\nmax_depth: 1\n")
         .unwrap();
-    run_ritual_command(&root, spec_path.to_str().unwrap(), false).unwrap();
-    let err = run_ritual_command(&root, spec_path.to_str().unwrap(), false).unwrap_err();
+    run_ritual_command(&root, spec_path.to_str().unwrap(), None, false).unwrap();
+    let err = run_ritual_command(&root, spec_path.to_str().unwrap(), None, false).unwrap_err();
     assert!(err.to_string().contains("already exists"));
+}
+
+#[test]
+fn run_ritual_errors_on_unknown_backend() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("BackendProj".into())).unwrap();
+    let bin_path = temp.path().join("binBK.so");
+    std::fs::write(&bin_path, b"payload").unwrap();
+    add_binary_command(&root, bin_path.to_str().unwrap(), Some("BinBK".into()), None, None, false)
+        .unwrap();
+
+    let spec_path = temp.path().join("backend.yaml");
+    std::fs::write(
+        &spec_path,
+        "name: BackendRun\nbinary: BinBK\nroots: [entry_point]\nmax_depth: 1\n",
+    )
+    .unwrap();
+
+    let err =
+        run_ritual_command(&root, spec_path.to_str().unwrap(), Some("missing-backend"), false)
+            .unwrap_err();
+    assert!(err.to_string().contains("Backend 'missing-backend' not found"));
 }
 
 #[test]

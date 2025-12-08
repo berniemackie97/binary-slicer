@@ -50,6 +50,7 @@ fn ritual_run_record_round_trip() {
         ritual: "Rit".into(),
         spec_hash: "abc".into(),
         binary_hash: Some("binhash".into()),
+        backend: "validate-only".into(),
         status: ritual_core::db::RitualRunStatus::Stubbed,
         started_at: "now".into(),
         finished_at: "now".into(),

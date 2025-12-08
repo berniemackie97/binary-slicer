@@ -17,6 +17,12 @@ use ritual_core::services::analysis::{
     default_backend_registry, AnalysisOptions, AnalysisRequest, RitualRunner, RunMetadata,
 };
 
+const DEFAULT_BACKEND_NAME: &str = "validate-only";
+
+fn default_backend_name() -> String {
+    DEFAULT_BACKEND_NAME.to_string()
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RitualSpec {
     pub name: String,
@@ -24,6 +30,8 @@ pub struct RitualSpec {
     pub roots: Vec<String>,
     #[serde(default)]
     pub max_depth: Option<u32>,
+    #[serde(default)]
+    pub backend: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
@@ -46,6 +54,8 @@ pub struct RitualRunMetadata {
     pub binary: String,
     pub spec_hash: String,
     pub binary_hash: Option<String>,
+    #[serde(default = "default_backend_name")]
+    pub backend: String,
     pub started_at: String,
     pub finished_at: String,
     pub status: RitualRunStatus,
@@ -60,6 +70,7 @@ pub struct RitualRunInfo {
     pub finished_at: Option<String>,
     pub status: Option<String>,
     pub spec_hash: Option<String>,
+    pub backend: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -103,11 +114,17 @@ pub fn db_run_to_info(
         finished_at: Some(rec.finished_at.clone()),
         status: Some(rec.status.as_str().to_string()),
         spec_hash: Some(rec.spec_hash.clone()),
+        backend: Some(rec.backend.clone()),
     }
 }
 
 /// Run a ritual spec (stub analysis) and organize outputs per binary and ritual name.
-pub fn run_ritual_command(root: &str, file: &str, force: bool) -> Result<()> {
+pub fn run_ritual_command(
+    root: &str,
+    file: &str,
+    backend_override: Option<&str>,
+    force: bool,
+) -> Result<()> {
     use ritual_core::db::ProjectLayout;
 
     let root_path = canonicalize_or_current(root)?;
@@ -154,17 +171,6 @@ pub fn run_ritual_command(root: &str, file: &str, force: bool) -> Result<()> {
         format!("Failed to create ritual output dir {}", run_output_root.display())
     })?;
 
-    // Persist a normalized spec copy into the run directory.
-    let normalized_spec_path = run_output_root.join("spec.yaml");
-    let mut spec_copy = spec;
-    if spec_copy.outputs.is_none() {
-        spec_copy.outputs = Some(RitualOutputs { reports: true, graphs: true, docs: true });
-    }
-    let yaml = serde_yaml::to_string(&spec_copy).context("Failed to serialize ritual spec")?;
-    fs::write(&normalized_spec_path, yaml).with_context(|| {
-        format!("Failed to write normalized spec to {}", normalized_spec_path.display())
-    })?;
-
     // Resolve binary hash (prefer stored hash; compute if missing).
     let binary_path = {
         let p = Path::new(&target_bin.path);
@@ -182,9 +188,27 @@ pub fn run_ritual_command(root: &str, file: &str, force: bool) -> Result<()> {
         None
     };
 
-    // Invoke analysis service (validate-only backend for now).
+    // Choose backend (CLI override > spec > default), then persist normalized spec copy.
+    let backend_name = backend_override
+        .map(|s| s.to_string())
+        .or_else(|| spec.backend.clone())
+        .unwrap_or_else(default_backend_name);
+    let mut spec_copy = spec;
+    if spec_copy.outputs.is_none() {
+        spec_copy.outputs = Some(RitualOutputs { reports: true, graphs: true, docs: true });
+    }
+    spec_copy.backend = Some(backend_name.clone());
+    let normalized_spec_path = run_output_root.join("spec.yaml");
+    let yaml = serde_yaml::to_string(&spec_copy).context("Failed to serialize ritual spec")?;
+    fs::write(&normalized_spec_path, yaml).with_context(|| {
+        format!("Failed to write normalized spec to {}", normalized_spec_path.display())
+    })?;
+
+    // Invoke analysis service (validate-only default backend for now).
     let backends = default_backend_registry();
-    let backend = backends.get("validate-only").ok_or_else(|| anyhow!("Backend not found"))?;
+    let backend = backends.get(&backend_name).ok_or_else(|| {
+        anyhow!("Backend '{}' not found (available: {:?})", backend_name, backends.names())
+    })?;
     let request = AnalysisRequest {
         ritual_name: spec_copy.name.clone(),
         binary_name: target_bin.name.clone(),
@@ -206,6 +230,7 @@ pub fn run_ritual_command(root: &str, file: &str, force: bool) -> Result<()> {
     let run_meta = RunMetadata {
         spec_hash: spec_hash.clone(),
         binary_hash: binary_hash.clone(),
+        backend: backend_name.clone(),
         status: RitualRunStatus::Stubbed,
     };
     let analysis_result = runner.run(&request, &run_meta)?;
@@ -218,6 +243,7 @@ pub fn run_ritual_command(root: &str, file: &str, force: bool) -> Result<()> {
         "roots": spec_copy.roots,
         "max_depth": spec_copy.max_depth,
         "status": run_meta.status.as_str(),
+        "backend": backend_name,
         "functions": analysis_result.functions,
         "edges": analysis_result.call_edges,
         "evidence": analysis_result.evidence,
@@ -232,6 +258,7 @@ pub fn run_ritual_command(root: &str, file: &str, force: bool) -> Result<()> {
         binary: target_bin.name.clone(),
         spec_hash,
         binary_hash,
+        backend: backend_name,
         started_at: now.clone(),
         finished_at: now,
         status: run_meta.status,
@@ -254,6 +281,7 @@ pub fn rerun_ritual_command(
     binary: &str,
     ritual: &str,
     as_name: &str,
+    backend_override: Option<&str>,
     force: bool,
 ) -> Result<()> {
     use ritual_core::db::ProjectLayout;
@@ -303,16 +331,6 @@ pub fn rerun_ritual_command(
     fs::create_dir_all(&new_run_root)
         .with_context(|| format!("Failed to create rerun dir {}", new_run_root.display()))?;
 
-    // Write normalized spec copy for rerun.
-    let normalized_spec_path = new_run_root.join("spec.yaml");
-    if spec.outputs.is_none() {
-        spec.outputs = Some(RitualOutputs { reports: true, graphs: true, docs: true });
-    }
-    let yaml = serde_yaml::to_string(&spec).context("Failed to serialize ritual spec")?;
-    fs::write(&normalized_spec_path, yaml).with_context(|| {
-        format!("Failed to write normalized spec to {}", normalized_spec_path.display())
-    })?;
-
     // Hash binary path.
     let binary_path = {
         let p = Path::new(&target_bin.path);
@@ -330,9 +348,26 @@ pub fn rerun_ritual_command(
         None
     };
 
-    // Invoke analysis service (validate-only backend for now).
+    // Choose backend (CLI override > spec > default), then write normalized spec copy.
+    let backend_name = backend_override
+        .map(|s| s.to_string())
+        .or_else(|| spec.backend.clone())
+        .unwrap_or_else(default_backend_name);
+    if spec.outputs.is_none() {
+        spec.outputs = Some(RitualOutputs { reports: true, graphs: true, docs: true });
+    }
+    spec.backend = Some(backend_name.clone());
+    let normalized_spec_path = new_run_root.join("spec.yaml");
+    let yaml = serde_yaml::to_string(&spec).context("Failed to serialize ritual spec")?;
+    fs::write(&normalized_spec_path, yaml).with_context(|| {
+        format!("Failed to write normalized spec to {}", normalized_spec_path.display())
+    })?;
+
+    // Invoke analysis service (validate-only default backend for now).
     let backends = default_backend_registry();
-    let backend = backends.get("validate-only").ok_or_else(|| anyhow!("Backend not found"))?;
+    let backend = backends.get(&backend_name).ok_or_else(|| {
+        anyhow!("Backend '{}' not found (available: {:?})", backend_name, backends.names())
+    })?;
     let request = AnalysisRequest {
         ritual_name: as_name.to_string(),
         binary_name: target_bin.name.clone(),
@@ -354,6 +389,7 @@ pub fn rerun_ritual_command(
     let run_meta = RunMetadata {
         spec_hash: spec_hash.clone(),
         binary_hash: binary_hash.clone(),
+        backend: backend_name.clone(),
         status: RitualRunStatus::Stubbed,
     };
     let analysis_result = runner.run(&request, &run_meta)?;
@@ -366,6 +402,7 @@ pub fn rerun_ritual_command(
         "roots": spec.roots,
         "max_depth": spec.max_depth,
         "status": run_meta.status.as_str(),
+        "backend": backend_name,
         "functions": analysis_result.functions,
         "edges": analysis_result.call_edges,
         "evidence": analysis_result.evidence,
@@ -380,6 +417,7 @@ pub fn rerun_ritual_command(
         binary: target_bin.name.clone(),
         spec_hash,
         binary_hash,
+        backend: backend_name,
         started_at: now.clone(),
         finished_at: now,
         status: RitualRunStatus::Stubbed,
@@ -510,6 +548,7 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
                 "metadata": {
                     "spec_hash": run.spec_hash,
                     "binary_hash": run.binary_hash,
+                    "backend": run.backend,
                     "status": run.status.as_str(),
                     "started_at": run.started_at,
                     "finished_at": run.finished_at,
@@ -542,6 +581,7 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
                 println!("  Binary hash: {}", bh);
             }
             println!("  Spec hash: {}", run.spec_hash);
+            println!("  Backend: {}", run.backend);
             println!("  Started:  {}", run.started_at);
             println!("  Finished: {}", run.finished_at);
         }
@@ -551,6 +591,7 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
                 println!("  Binary hash: {}", bh);
             }
             println!("  Spec hash: {}", meta.spec_hash);
+            println!("  Backend: {}", meta.backend);
             println!("  Started:  {}", meta.started_at);
             println!("  Finished: {}", meta.finished_at);
         }

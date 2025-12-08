@@ -16,6 +16,7 @@ fn ritual_runs_insert_and_list_round_trip() {
         ritual: "Run1".into(),
         spec_hash: "specA".into(),
         binary_hash: Some("binhashA".into()),
+        backend: "validate-only".into(),
         status: ritual_core::db::RitualRunStatus::Stubbed,
         started_at: "t0".into(),
         finished_at: "t1".into(),
@@ -25,6 +26,7 @@ fn ritual_runs_insert_and_list_round_trip() {
         ritual: "Run2".into(),
         spec_hash: "specB".into(),
         binary_hash: None,
+        backend: "validate-only".into(),
         status: ritual_core::db::RitualRunStatus::Stubbed,
         started_at: "t2".into(),
         finished_at: "t3".into(),
@@ -52,7 +54,7 @@ fn ritual_runs_insert_and_list_round_trip() {
 }
 
 #[test]
-fn existing_schema_is_migrated_to_v2() {
+fn existing_schema_is_migrated_to_latest() {
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("project.db");
 
@@ -82,11 +84,11 @@ fn existing_schema_is_migrated_to_v2() {
         .expect("create v1 schema");
     }
 
-    // Opening via ProjectDb should migrate to v2 and create ritual_runs table.
+    // Opening via ProjectDb should migrate to latest and create ritual_runs table.
     let db = ProjectDb::open(&db_path).expect("open and migrate");
     let version: i32 =
         db.connection().query_row("PRAGMA user_version;", [], |row| row.get(0)).unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
 
     // Table should accept inserts post-migration.
     let run = RitualRunRecord {
@@ -94,6 +96,7 @@ fn existing_schema_is_migrated_to_v2() {
         ritual: "RunX".into(),
         spec_hash: "sh".into(),
         binary_hash: None,
+        backend: "validate-only".into(),
         status: ritual_core::db::RitualRunStatus::Stubbed,
         started_at: "t".into(),
         finished_at: "t".into(),

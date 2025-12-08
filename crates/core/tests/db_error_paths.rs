@@ -26,7 +26,7 @@ fn project_db_open_errors_on_unsupported_schema_version() {
         Err(DbError::UnsupportedSchemaVersion { found, min_supported, max_supported }) => {
             assert_eq!(found, 99, "unexpected found schema version");
             assert_eq!(min_supported, 0, "unexpected min_supported schema version");
-            assert_eq!(max_supported, 2, "unexpected max_supported schema version");
+            assert_eq!(max_supported, 3, "unexpected max_supported schema version");
         }
         Err(err) => {
             panic!("expected UnsupportedSchemaVersion error, got different DbError: {err}");

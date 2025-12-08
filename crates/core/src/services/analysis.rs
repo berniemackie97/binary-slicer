@@ -45,6 +45,7 @@ pub struct AnalysisResult {
 pub struct RunMetadata {
     pub spec_hash: String,
     pub binary_hash: Option<String>,
+    pub backend: String,
     pub status: RitualRunStatus,
 }
 
@@ -93,12 +94,20 @@ impl BackendRegistry {
         Self { backends: HashMap::new() }
     }
 
-    pub fn register<B: AnalysisBackend + 'static>(&mut self, backend: B) {
+    pub fn register<B: AnalysisBackend + 'static>(&mut self, backend: B) -> &mut Self {
         self.backends.insert(backend.name().to_string(), Box::new(backend));
+        self
     }
 
     pub fn get(&self, name: &str) -> Option<&dyn AnalysisBackend> {
         self.backends.get(name).map(|b| &**b)
+    }
+
+    /// Return a sorted list of registered backend names for error messages/help.
+    pub fn names(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.backends.keys().cloned().collect();
+        keys.sort();
+        keys
     }
 }
 
@@ -128,6 +137,7 @@ impl<'a> RitualRunner<'a> {
             ritual: request.ritual_name.clone(),
             spec_hash: meta.spec_hash.clone(),
             binary_hash: meta.binary_hash.clone(),
+            backend: meta.backend.clone(),
             status: meta.status.clone(),
             started_at: now.clone(),
             finished_at: now,

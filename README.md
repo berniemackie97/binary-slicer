@@ -65,7 +65,8 @@ binary-slicer project-info --root /path/to/workdir
 binary-slicer emit-slice-docs --root /path/to/workdir
 binary-slicer emit-slice-reports --root /path/to/workdir
 
-# 7) Run a ritual spec (analysis stub) – stores normalized spec + report under outputs/binaries/<bin>/<ritual>/
+# 7) Run a ritual spec (analysis stub) - stores normalized spec + report under outputs/binaries/<bin>/<ritual>/
+#    You can choose a backend with --backend <name>; currently `validate-only` is available by default.
 cat > /path/to/workdir/rituals/telemetry.yaml <<'YAML'
 name: TelemetryRun
 binary: DemoBin
@@ -74,6 +75,8 @@ roots:
 max_depth: 3
 YAML
 binary-slicer run-ritual --root /path/to/workdir --file /path/to/workdir/rituals/telemetry.yaml
+# Example overriding backend:
+# binary-slicer run-ritual --root ... --file ... --backend validate-only
 # re-run with --force to overwrite an existing run output directory
 # binary-slicer run-ritual --root ... --file ... --force
 

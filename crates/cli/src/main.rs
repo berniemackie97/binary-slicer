@@ -137,6 +137,10 @@ enum Command {
         #[arg(long)]
         file: String,
 
+        /// Backend to use (overrides backend in the spec). Defaults to validate-only.
+        #[arg(long)]
+        backend: Option<String>,
+
         /// Overwrite an existing ritual run output directory if present.
         #[arg(long, default_value_t = false)]
         force: bool,
@@ -251,6 +255,10 @@ enum Command {
         #[arg(long)]
         as_name: String,
 
+        /// Backend to use (overrides backend in the spec). Defaults to validate-only.
+        #[arg(long)]
+        backend: Option<String>,
+
         /// Overwrite output directory if it already exists.
         #[arg(long, default_value_t = false)]
         force: bool,
@@ -275,8 +283,8 @@ fn main() -> Result<()> {
         Command::ListBinaries { root, json } => commands::list_binaries_command(&root, json)?,
         Command::EmitSliceDocs { root } => commands::emit_slice_docs_command(&root)?,
         Command::EmitSliceReports { root } => commands::emit_slice_reports_command(&root)?,
-        Command::RunRitual { root, file, force } => {
-            commands::run_ritual_command(&root, &file, force)?
+        Command::RunRitual { root, file, backend, force } => {
+            commands::run_ritual_command(&root, &file, backend.as_deref(), force)?
         }
         Command::CleanOutputs { root, binary, ritual, all, yes } => {
             commands::clean_outputs_command(&root, binary.as_deref(), ritual.as_deref(), all, yes)?
@@ -299,8 +307,15 @@ fn main() -> Result<()> {
                 finished_at,
             )?
         }
-        Command::RerunRitual { root, binary, ritual, as_name, force } => {
-            commands::rerun_ritual_command(&root, &binary, &ritual, &as_name, force)?
+        Command::RerunRitual { root, binary, ritual, as_name, backend, force } => {
+            commands::rerun_ritual_command(
+                &root,
+                &binary,
+                &ritual,
+                &as_name,
+                backend.as_deref(),
+                force,
+            )?
         }
     }
 

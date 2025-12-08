@@ -126,6 +126,7 @@ pub struct RitualRunRecord {
     pub ritual: String,
     pub spec_hash: String,
     pub binary_hash: Option<String>,
+    pub backend: String,
     pub status: RitualRunStatus,
     pub started_at: String,
     pub finished_at: String,

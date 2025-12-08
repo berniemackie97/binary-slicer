@@ -78,6 +78,7 @@ fn ritual_runner_invokes_backend_and_inserts_run() {
             &RunMetadata {
                 spec_hash: "hash123".into(),
                 binary_hash: Some("binhash".into()),
+                backend: "noop".into(),
                 status: ritual_core::db::RitualRunStatus::Succeeded,
             },
         )

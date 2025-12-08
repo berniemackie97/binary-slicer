@@ -11,10 +11,10 @@ fn project_db_initializes_and_handles_binaries_and_slices() {
         let db = ProjectDb::open(&db_path).expect("open db");
         let conn = db.connection();
 
-        // Check that user_version is set to 2.
+        // Check that user_version is set to latest.
         let version: i32 =
             conn.query_row("PRAGMA user_version;", [], |row| row.get(0)).expect("schema version");
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
 
         // Insert a binary.
         let bin = BinaryRecord::new("libExampleGame.so", "binaries/libExampleGame.so");
@@ -44,7 +44,7 @@ fn project_db_initializes_and_handles_binaries_and_slices() {
 
         let version: i32 =
             conn.query_row("PRAGMA user_version;", [], |row| row.get(0)).expect("schema version");
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
 
         let binaries = db.list_binaries().expect("list binaries");
         assert_eq!(binaries.len(), 1);

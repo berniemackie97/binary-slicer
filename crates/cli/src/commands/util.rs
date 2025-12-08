@@ -68,7 +68,7 @@ pub fn collect_ritual_runs_on_disk(
             let run_name = run_entry.file_name().to_string_lossy().to_string();
             let run_path = run_entry.path();
             let metadata_path = run_path.join("run_metadata.json");
-            let (started_at, finished_at, status, spec_hash) = if metadata_path.exists() {
+            let (started_at, finished_at, status, spec_hash, backend) = if metadata_path.exists() {
                 match fs::read_to_string(&metadata_path)
                     .ok()
                     .and_then(|body| serde_json::from_str::<RitualRunMetadata>(&body).ok())
@@ -78,11 +78,12 @@ pub fn collect_ritual_runs_on_disk(
                         Some(meta.finished_at),
                         Some(meta.status.as_str().to_string()),
                         Some(meta.spec_hash),
+                        Some(meta.backend),
                     ),
-                    None => (None, None, None, None),
+                    None => (None, None, None, None, None),
                 }
             } else {
-                (None, None, None, None)
+                (None, None, None, None, None)
             };
 
             runs.push(RitualRunInfo {
@@ -93,6 +94,7 @@ pub fn collect_ritual_runs_on_disk(
                 finished_at,
                 status,
                 spec_hash,
+                backend,
             });
         }
     }
