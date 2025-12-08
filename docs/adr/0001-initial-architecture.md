@@ -8,7 +8,7 @@ Accepted
 
 We want a slice-oriented reverse-engineering assistant for native game/engine binaries, designed to:
 
-- Work over large binaries (e.g., `libCQ2Client.so`).
+- Work over large binaries (e.g., `libExampleGame.so`).
 - Operate deterministically with explicit evidence and no ML.
 - Be driven by a scriptable DSL ("rituals") and run headless.
 - Maintain a persistent project knowledge base across builds.

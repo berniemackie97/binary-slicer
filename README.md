@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/berniemackie97/binary-slicer/actions/workflows/ci.yml/badge.svg)](https://github.com/berniemackie97/binary-slicer/actions/workflows/ci.yml)
 
-Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of native game/engine binaries (starting with `libCQ2Client.so`). It helps you carve a large binary into **subsystems ("slices")** with explicit evidence and repeatable workflows.
+Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of native game/engine binaries (e.g., `libExampleGame.so`). It helps you carve a large binary into **subsystems ("slices")** with explicit evidence and repeatable workflows.
 
 > No vibes, only receipts. Slice-first, evidence-first.
 
@@ -22,6 +22,7 @@ Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of na
   - `list-ritual-runs` enumerates runs discovered under `outputs/binaries` (human/JSON).
   - `show-ritual-run` prints metadata/paths for a single run (human/JSON).
   - `clean-outputs` safely deletes run outputs (per binary, per ritual, or all) with `--yes`.
+  - Run metadata is also persisted in the project DB (binary, ritual, hashes, status, timestamps) for easy querying.
 - Tests + coverage (`cargo llvm-cov --workspace --summary-only` with gates) and local CI scripts.
 
 Planned next milestones:
@@ -36,10 +37,10 @@ Binary name: `binary-slicer` (CLI branding string also `binary-slicer`).
 
 ```bash
 # 1) Init a project (creates .ritual/, docs/, reports/, graphs/)
-binary-slicer init-project --root /path/to/workdir --name CQ2Reverse
+binary-slicer init-project --root /path/to/workdir --name GameReverse
 
 # 2) Register a binary (auto-hashes unless you provide/skip)
-binary-slicer add-binary --root /path/to/workdir --path /path/to/libCQ2Client.so --arch armv7
+binary-slicer add-binary --root /path/to/workdir --path /path/to/libExampleGame.so --arch armv7
 # or: --hash <precomputed>    to store a provided hash
 # or: --skip-hash             to avoid hashing large files
 

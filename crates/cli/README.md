@@ -17,8 +17,8 @@ Binary name is `binary-slicer`. Run `binary-slicer --help` for full usage.
 ## Examples
 
 ```bash
-binary-slicer init-project --root /work/binary --name CQ2Reverse
-binary-slicer add-binary --root /work/binary --path /binaries/libCQ2Client.so --arch armv7
+binary-slicer init-project --root /work/binary --name ExampleReverse
+binary-slicer add-binary --root /work/binary --path /binaries/libExampleGame.so --arch armv7
 binary-slicer init-slice --root /work/binary --name AutoUpdateManager --description "OTA logic"
 binary-slicer list-slices --root /work/binary
 binary-slicer list-binaries --root /work/binary --json

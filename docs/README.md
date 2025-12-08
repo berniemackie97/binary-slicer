@@ -42,5 +42,5 @@ This directory contains documentation and design notes for Binary Slicer.
 - Ritual DSL reference and examples.
 - Backend integration notes (rizin, Capstone, IDA, Ghidra).
 - Project DB schema and migration notes.
-- End-to-end workflows (e.g., `libCQ2Client.so`).
+- End-to-end workflows (e.g., `libExampleGame.so`).
 - Evidence index format and cross-build diffing approach.

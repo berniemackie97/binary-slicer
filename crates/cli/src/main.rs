@@ -64,7 +64,7 @@ enum Command {
         json: bool,
     },
 
-    /// Register a binary (e.g., libCQ2Client.so) in the project database.
+    /// Register a binary (e.g., libExampleGame.so) in the project database.
     ///
     /// This does not perform analysis; it just records that the binary exists
     /// and where it lives relative to the project root.
@@ -365,6 +365,7 @@ struct ProjectInfoSnapshot {
     binaries: Vec<ritual_core::db::BinaryRecord>,
     slices: Vec<ritual_core::db::SliceRecord>,
     ritual_runs: Vec<RitualRunInfo>,
+    ritual_specs: Vec<RitualSpecInfo>,
 }
 
 #[derive(Serialize)]
@@ -423,7 +424,18 @@ fn project_info_command(root: &str, json: bool) -> Result<()> {
         .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
     let binaries = db.list_binaries().context("Failed to list binaries")?;
     let slices = db.list_slices().context("Failed to list slices")?;
-    let ritual_runs = collect_ritual_runs(&layout, None)?;
+    let db_runs = db.list_ritual_runs(None).unwrap_or_default();
+    let mut ritual_runs: Vec<RitualRunInfo> =
+        db_runs.iter().map(|r| db_run_to_info(&layout, r)).collect();
+    // Include any on-disk runs not yet in the DB (backward compatibility).
+    let disk_runs = collect_ritual_runs_on_disk(&layout, None)?;
+    for dr in disk_runs {
+        if !ritual_runs.iter().any(|r| r.binary == dr.binary && r.name == dr.name) {
+            ritual_runs.push(dr);
+        }
+    }
+    ritual_runs.sort_by(|a, b| a.name.cmp(&b.name).then(a.binary.cmp(&b.binary)));
+    let ritual_specs = collect_ritual_specs(&layout.rituals_dir).unwrap_or_default();
 
     if json {
         let snapshot = ProjectInfoSnapshot {
@@ -444,6 +456,7 @@ fn project_info_command(root: &str, json: bool) -> Result<()> {
             binaries,
             slices,
             ritual_runs,
+            ritual_specs,
         };
         let serialized = serde_json::to_string_pretty(&snapshot)?;
         println!("{}", serialized);
@@ -469,6 +482,7 @@ fn project_info_command(root: &str, json: bool) -> Result<()> {
     print_dir_status("Rituals dir", &layout.rituals_dir);
     print_dir_status("Outputs dir", &layout.outputs_dir);
     println!();
+    println!("Ritual specs: {}", ritual_specs.len());
     println!("Ritual runs: {}", ritual_runs.len());
 
     Ok(())
@@ -957,6 +971,19 @@ fn run_ritual_command(root: &str, file: &str, force: bool) -> Result<()> {
     fs::write(&metadata_path, serde_json::to_string_pretty(&metadata)?)
         .with_context(|| format!("Failed to write run metadata at {}", metadata_path.display()))?;
 
+    // Persist run to the project DB.
+    let run_record = ritual_core::db::RitualRunRecord {
+        binary: metadata.binary.clone(),
+        ritual: metadata.ritual.clone(),
+        spec_hash: metadata.spec_hash.clone(),
+        binary_hash: metadata.binary_hash.clone(),
+        status: metadata.status.clone(),
+        started_at: metadata.started_at.clone(),
+        finished_at: metadata.finished_at.clone(),
+    };
+    db.insert_ritual_run(&run_record)
+        .with_context(|| format!("Failed to record ritual run in DB {}", db_path.display()))?;
+
     println!("Ran ritual (stub): {}", spec_copy.name);
     println!("  Binary: {}", target_bin.name);
     println!("  Roots: {:?}", spec_copy.roots);
@@ -1019,7 +1046,35 @@ fn list_ritual_runs_command(root: &str, binary_filter: Option<&str>, json: bool)
     let root_path = canonicalize_or_current(root)?;
     let layout = ritual_core::db::ProjectLayout::new(&root_path);
 
-    let runs = collect_ritual_runs(&layout, binary_filter)?;
+    // Load DB runs first (authoritative).
+    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
+        format!("Failed to read project config at {}", layout.project_config_path.display())
+    })?;
+    let config: ritual_core::db::ProjectConfig =
+        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
+
+    let config_db_path = Path::new(&config.db.path);
+    let db_path = if config_db_path.is_absolute() {
+        config_db_path.to_path_buf()
+    } else {
+        layout.root.join(config_db_path)
+    };
+    let db = ritual_core::db::ProjectDb::open(&db_path)
+        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+    let mut runs: Vec<RitualRunInfo> = db
+        .list_ritual_runs(binary_filter)
+        .unwrap_or_default()
+        .iter()
+        .map(|r| db_run_to_info(&layout, r))
+        .collect();
+
+    // Merge in on-disk runs not in DB.
+    let disk_runs = collect_ritual_runs_on_disk(&layout, binary_filter)?;
+    for dr in disk_runs {
+        if !runs.iter().any(|r| r.binary == dr.binary && r.name == dr.name) {
+            runs.push(dr);
+        }
+    }
 
     if json {
         let serialized = serde_json::to_string_pretty(&runs)?;
@@ -1130,8 +1185,23 @@ fn list_ritual_specs_command(root: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
+fn db_run_to_info(
+    layout: &ritual_core::db::ProjectLayout,
+    rec: &ritual_core::db::RitualRunRecord,
+) -> RitualRunInfo {
+    RitualRunInfo {
+        binary: rec.binary.clone(),
+        name: rec.ritual.clone(),
+        path: layout.binary_output_root(&rec.binary).join(&rec.ritual).display().to_string(),
+        started_at: Some(rec.started_at.clone()),
+        finished_at: Some(rec.finished_at.clone()),
+        status: Some(rec.status.clone()),
+        spec_hash: Some(rec.spec_hash.clone()),
+    }
+}
+
 /// Discover ritual runs by scanning outputs/binaries/<binary>/<ritual>/.
-fn collect_ritual_runs(
+fn collect_ritual_runs_on_disk(
     layout: &ritual_core::db::ProjectLayout,
     binary_filter: Option<&str>,
 ) -> Result<Vec<RitualRunInfo>> {

@@ -142,6 +142,61 @@ fn project_info_json_output() {
     let v: serde_json::Value = serde_json::from_str(&body).expect("parse json");
     assert!(v["layout"]["rituals_dir"].as_str().unwrap().ends_with("rituals"));
     assert!(v["layout"]["outputs_dir"].as_str().unwrap().ends_with("outputs"));
+    assert_eq!(v["ritual_specs"].as_array().unwrap().len(), 0);
+    assert_eq!(v["ritual_runs"].as_array().unwrap().len(), 0);
+}
+
+/// `project-info --json` should include runs/specs when present.
+#[test]
+fn project_info_json_includes_runs() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let bin_path = root.join("libInfo.so");
+    fs::write(&bin_path, b"dummy").expect("write binary");
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("InfoBin")
+        .assert()
+        .success();
+
+    let spec_path = root.join("info.yaml");
+    let spec_yaml = r#"name: InfoRun
+binary: InfoBin
+roots: [start]
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .success();
+
+    let output = cargo_bin_cmd!("binary-slicer")
+        .arg("project-info")
+        .arg("--root")
+        .arg(root)
+        .arg("--json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&output).expect("parse json");
+    assert_eq!(v["ritual_runs"].as_array().unwrap().len(), 1);
+    assert_eq!(v["ritual_runs"][0]["binary"], "InfoBin");
+    assert_eq!(v["ritual_runs"][0]["name"], "InfoRun");
 }
 
 /// `add-binary` should fail when the target binary path does not exist.
@@ -470,7 +525,7 @@ fn run_ritual_scaffolds_output_for_binary() {
     // Init project and add a binary.
     cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
 
-    let bin_path = root.join("libCQ2Client.so");
+    let bin_path = root.join("libExampleGame.so");
     fs::write(&bin_path, b"dummy").expect("write binary");
 
     cargo_bin_cmd!("binary-slicer")
@@ -480,14 +535,14 @@ fn run_ritual_scaffolds_output_for_binary() {
         .arg("--path")
         .arg(&bin_path)
         .arg("--name")
-        .arg("CQ2Bin")
+        .arg("ExampleBin")
         .assert()
         .success();
 
     // Write ritual spec (YAML).
     let spec_path = root.join("ritual.yaml");
     let spec_yaml = r#"name: SliceRun
-binary: CQ2Bin
+binary: ExampleBin
 roots:
   - main_loop
 "#;
@@ -503,20 +558,20 @@ roots:
         .success();
 
     let layout = ritual_core::db::ProjectLayout::new(root);
-    let run_root = layout.binary_output_root("CQ2Bin").join("SliceRun");
+    let run_root = layout.binary_output_root("ExampleBin").join("SliceRun");
     let spec_out = run_root.join("spec.yaml");
     let report_out = run_root.join("report.json");
 
     let spec_contents = fs::read_to_string(&spec_out).expect("read normalized spec");
     let spec: serde_yaml::Value = serde_yaml::from_str(&spec_contents).expect("parse spec yaml");
     assert_eq!(spec["name"], "SliceRun");
-    assert_eq!(spec["binary"], "CQ2Bin");
+    assert_eq!(spec["binary"], "ExampleBin");
     assert_eq!(spec["roots"][0], "main_loop");
 
     let report_contents = fs::read_to_string(&report_out).expect("read report");
     let report_json: serde_json::Value =
         serde_json::from_str(&report_contents).expect("parse report json");
-    assert_eq!(report_json["binary"], "CQ2Bin");
+    assert_eq!(report_json["binary"], "ExampleBin");
     assert_eq!(report_json["ritual"], "SliceRun");
 }
 
@@ -921,6 +976,63 @@ roots: [start]
     assert_eq!(runs[0]["name"], "ListRun");
 }
 
+/// `list-ritual-runs --json` should include DB metadata.
+#[test]
+fn list_ritual_runs_json_includes_status() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let bin_path = root.join("libJson.so");
+    fs::write(&bin_path, b"dummy").expect("write binary");
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("JsonBin")
+        .assert()
+        .success();
+
+    let spec_path = root.join("jsonrun.yaml");
+    let spec_yaml = r#"name: JsonRun
+binary: JsonBin
+roots: [entry_point]
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .success();
+
+    let output = cargo_bin_cmd!("binary-slicer")
+        .arg("list-ritual-runs")
+        .arg("--root")
+        .arg(root)
+        .arg("--binary")
+        .arg("JsonBin")
+        .arg("--json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let runs: Vec<serde_json::Value> = serde_json::from_slice(&output).expect("parse runs json");
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0]["binary"], "JsonBin");
+    assert_eq!(runs[0]["name"], "JsonRun");
+    assert!(runs[0]["status"].as_str().is_some());
+    assert!(runs[0]["spec_hash"].as_str().is_some());
+}
+
 /// `clean-outputs` should refuse without --yes and delete scoped outputs with it.
 #[test]
 fn clean_outputs_requires_confirmation_and_scopes() {
@@ -988,6 +1100,53 @@ fn clean_outputs_requires_confirmation_and_scopes() {
         .success();
     assert!(!bin_a_run.exists());
     assert!(bin_b_run.exists());
+}
+
+/// `clean-outputs --all` should delete all outputs when confirmed.
+#[test]
+fn clean_outputs_all_removes_everything() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+    let bin_path = root.join("libAll.so");
+    fs::write(&bin_path, b"dummy").expect("write binary");
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("AllBin")
+        .assert()
+        .success();
+    let spec_path = root.join("all.yaml");
+    fs::write(&spec_path, "name: AllRun\nbinary: AllBin\nroots: [start]\n").expect("write spec");
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .success();
+
+    let layout = ritual_core::db::ProjectLayout::new(root);
+    assert!(layout.binary_output_root("AllBin").join("AllRun").is_dir());
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("clean-outputs")
+        .arg("--root")
+        .arg(root)
+        .arg("--all")
+        .arg("--yes")
+        .assert()
+        .success();
+    // Outputs dir should be gone or empty.
+    if layout.outputs_binaries_dir.exists() {
+        assert!(layout.outputs_binaries_dir.read_dir().unwrap().next().is_none());
+    }
 }
 
 /// `add-binary` should accept a precomputed hash and skip hashing when requested.

@@ -25,7 +25,7 @@ use thiserror::Error;
 const MIN_SUPPORTED_SCHEMA_VERSION: i32 = 0;
 
 /// Latest schema version this crate knows about.
-const CURRENT_SCHEMA_VERSION: i32 = 1;
+const CURRENT_SCHEMA_VERSION: i32 = 2;
 
 /// Error type for project database operations.
 #[derive(Debug, Error)]
@@ -212,7 +212,7 @@ impl SliceStatus {
 /// and a value type used in the DB layer.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct BinaryRecord {
-    /// Human-friendly name (e.g., "libCQ2Client.so (armv7)").
+    /// Human-friendly name (e.g., "libExampleGame.so (armv7)").
     pub name: String,
     /// Path to the binary, relative to the project root if possible.
     pub path: String,
@@ -266,6 +266,18 @@ pub struct ProjectSnapshot {
     pub config: ProjectConfig,
     pub binaries: Vec<BinaryRecord>,
     pub slices: Vec<SliceRecord>,
+}
+
+/// Record describing a ritual run (analysis execution) for bookkeeping.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct RitualRunRecord {
+    pub binary: String,
+    pub ritual: String,
+    pub spec_hash: String,
+    pub binary_hash: Option<String>,
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: String,
 }
 
 /// SQLite-backed project database.
@@ -365,6 +377,72 @@ impl ProjectDb {
         }
         Ok(out)
     }
+
+    /// Insert a ritual run record and return its row id.
+    pub fn insert_ritual_run(&self, record: &RitualRunRecord) -> DbResult<i64> {
+        self.conn.execute(
+            r#"
+            INSERT INTO ritual_runs (binary, ritual, spec_hash, binary_hash, status, started_at, finished_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+            params![
+                record.binary,
+                record.ritual,
+                record.spec_hash,
+                record.binary_hash,
+                record.status,
+                record.started_at,
+                record.finished_at
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// List ritual runs, optionally filtered by binary name.
+    pub fn list_ritual_runs(&self, binary: Option<&str>) -> DbResult<Vec<RitualRunRecord>> {
+        fn map_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<RitualRunRecord> {
+            Ok(RitualRunRecord {
+                binary: row.get(0)?,
+                ritual: row.get(1)?,
+                spec_hash: row.get(2)?,
+                binary_hash: row.get(3)?,
+                status: row.get(4)?,
+                started_at: row.get(5)?,
+                finished_at: row.get(6)?,
+            })
+        }
+
+        let mut stmt = if binary.is_some() {
+            self.conn.prepare(
+                r#"
+                SELECT binary, ritual, spec_hash, binary_hash, status, started_at, finished_at
+                FROM ritual_runs
+                WHERE binary = ?1
+                ORDER BY id
+                "#,
+            )?
+        } else {
+            self.conn.prepare(
+                r#"
+                SELECT binary, ritual, spec_hash, binary_hash, status, started_at, finished_at
+                FROM ritual_runs
+                ORDER BY id
+                "#,
+            )?
+        };
+
+        let rows = if let Some(bin) = binary {
+            stmt.query_map(params![bin], map_run)?
+        } else {
+            stmt.query_map([], map_run)?
+        };
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
 }
 
 /// Apply schema migrations to bring the database to the latest version.
@@ -374,6 +452,7 @@ impl ProjectDb {
 /// Version map:
 /// - 0: no schema
 /// - 1: initial schema (binaries, slices)
+/// - 2: add ritual_runs table
 fn apply_migrations(conn: &Connection) -> DbResult<()> {
     let current_version = current_schema_version(conn)?;
 
@@ -412,8 +491,26 @@ fn apply_migrations(conn: &Connection) -> DbResult<()> {
         )?;
     }
 
-    // Future versions:
-    // if current_version < 2 { ... }
+    if current_version < 2 {
+        conn.execute_batch(
+            r#"
+            BEGIN;
+            CREATE TABLE IF NOT EXISTS ritual_runs (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                binary       TEXT NOT NULL,
+                ritual       TEXT NOT NULL,
+                spec_hash    TEXT NOT NULL,
+                binary_hash  TEXT,
+                status       TEXT NOT NULL,
+                started_at   TEXT NOT NULL,
+                finished_at  TEXT NOT NULL
+            );
+
+            PRAGMA user_version = 2;
+            COMMIT;
+            "#,
+        )?;
+    }
 
     Ok(())
 }

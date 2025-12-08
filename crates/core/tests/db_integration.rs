@@ -11,13 +11,13 @@ fn project_db_initializes_and_handles_binaries_and_slices() {
         let db = ProjectDb::open(&db_path).expect("open db");
         let conn = db.connection();
 
-        // Check that user_version is set to 1.
+        // Check that user_version is set to 2.
         let version: i32 =
             conn.query_row("PRAGMA user_version;", [], |row| row.get(0)).expect("schema version");
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
 
         // Insert a binary.
-        let bin = BinaryRecord::new("libCQ2Client.so", "binaries/libCQ2Client.so");
+        let bin = BinaryRecord::new("libExampleGame.so", "binaries/libExampleGame.so");
         let id = db.insert_binary(&bin).expect("insert binary");
         assert!(id > 0);
 
@@ -44,14 +44,17 @@ fn project_db_initializes_and_handles_binaries_and_slices() {
 
         let version: i32 =
             conn.query_row("PRAGMA user_version;", [], |row| row.get(0)).expect("schema version");
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
 
         let binaries = db.list_binaries().expect("list binaries");
         assert_eq!(binaries.len(), 1);
-        assert_eq!(binaries[0].name, "libCQ2Client.so");
+        assert_eq!(binaries[0].name, "libExampleGame.so");
 
         let slices = db.list_slices().expect("list slices");
         assert_eq!(slices.len(), 1);
         assert_eq!(slices[0].name, "AutoUpdateManager");
+
+        let runs = db.list_ritual_runs(None).expect("list ritual runs");
+        assert!(runs.is_empty());
     }
 }

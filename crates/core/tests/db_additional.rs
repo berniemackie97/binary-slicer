@@ -1,5 +1,6 @@
 use ritual_core::db::{
-    BinaryRecord, ProjectConfig, ProjectLayout, ProjectSnapshot, SliceRecord, SliceStatus,
+    BinaryRecord, ProjectConfig, ProjectLayout, ProjectSnapshot, RitualRunRecord, SliceRecord,
+    SliceStatus,
 };
 
 /// Ensure BinaryRecord::new sets optional fields to None.
@@ -39,4 +40,23 @@ fn project_snapshot_round_trip() {
     assert_eq!(de.config.name, config.name);
     assert_eq!(de.binaries.len(), 1);
     assert_eq!(de.slices.len(), 1);
+}
+
+/// RitualRunRecord should round-trip via serde.
+#[test]
+fn ritual_run_record_round_trip() {
+    let record = RitualRunRecord {
+        binary: "Bin".into(),
+        ritual: "Rit".into(),
+        spec_hash: "abc".into(),
+        binary_hash: Some("binhash".into()),
+        status: "stubbed".into(),
+        started_at: "now".into(),
+        finished_at: "now".into(),
+    };
+    let json = serde_json::to_string(&record).expect("serialize run");
+    let de: RitualRunRecord = serde_json::from_str(&json).expect("deserialize run");
+    assert_eq!(de.binary, "Bin");
+    assert_eq!(de.ritual, "Rit");
+    assert_eq!(de.binary_hash.as_deref(), Some("binhash"));
 }

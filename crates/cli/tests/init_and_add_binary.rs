@@ -24,7 +24,7 @@ fn init_project_and_add_binary_registers_in_db() {
     cargo_bin_cmd!("binary-slicer").arg("project-info").arg("--root").arg(root).assert().success();
 
     // 3. Create a dummy binary file under the project root.
-    let bin_path = root.join("libCQ2Client.so");
+    let bin_path = root.join("libExampleGame.so");
     fs::write(&bin_path, b"dummy-binary").expect("write dummy binary");
 
     // 4. Register the binary via CLI.
@@ -35,7 +35,7 @@ fn init_project_and_add_binary_registers_in_db() {
         .arg("--path")
         .arg(&bin_path)
         .arg("--name")
-        .arg("CQ2ClientLib")
+        .arg("ExampleLib")
         .arg("--arch")
         .arg("armv7")
         .assert()
@@ -46,9 +46,9 @@ fn init_project_and_add_binary_registers_in_db() {
     let db = ProjectDb::open(&layout.db_path).expect("open db");
     let binaries = db.list_binaries().expect("list binaries");
     assert_eq!(binaries.len(), 1);
-    assert_eq!(binaries[0].name, "CQ2ClientLib");
+    assert_eq!(binaries[0].name, "ExampleLib");
     // Path should be relative to the project root (just the file name).
-    assert_eq!(binaries[0].path, "libCQ2Client.so");
+    assert_eq!(binaries[0].path, "libExampleGame.so");
     assert_eq!(binaries[0].arch.as_deref(), Some("armv7"));
 
     let mut hasher = Sha256::new();
