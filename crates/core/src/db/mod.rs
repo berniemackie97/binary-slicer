@@ -443,6 +443,38 @@ impl ProjectDb {
         }
         Ok(out)
     }
+
+    /// Update status (and optionally finished_at) for a ritual run.
+    ///
+    /// Returns the number of rows affected.
+    pub fn update_ritual_run_status(
+        &self,
+        binary: &str,
+        ritual: &str,
+        status: &str,
+        finished_at: Option<&str>,
+    ) -> DbResult<usize> {
+        let affected = if let Some(finish) = finished_at {
+            self.conn.execute(
+                r#"
+                UPDATE ritual_runs
+                SET status = ?1, finished_at = ?2
+                WHERE binary = ?3 AND ritual = ?4
+                "#,
+                params![status, finish, binary, ritual],
+            )?
+        } else {
+            self.conn.execute(
+                r#"
+                UPDATE ritual_runs
+                SET status = ?1
+                WHERE binary = ?2 AND ritual = ?3
+                "#,
+                params![status, binary, ritual],
+            )?
+        };
+        Ok(affected)
+    }
 }
 
 /// Apply schema migrations to bring the database to the latest version.

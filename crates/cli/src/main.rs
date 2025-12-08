@@ -235,6 +235,29 @@ enum Command {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+
+    /// Update the status of a ritual run recorded in the project DB.
+    UpdateRitualRunStatus {
+        /// Project root directory. Defaults to the current working directory.
+        #[arg(long, default_value = ".")]
+        root: String,
+
+        /// Binary name (required).
+        #[arg(long)]
+        binary: String,
+
+        /// Ritual name (required).
+        #[arg(long)]
+        ritual: String,
+
+        /// New status (one of: pending, running, succeeded, failed, canceled, stubbed).
+        #[arg(long)]
+        status: String,
+
+        /// Optional finished_at timestamp override (RFC3339). Defaults to now if omitted.
+        #[arg(long)]
+        finished_at: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -266,6 +289,9 @@ fn main() -> Result<()> {
             show_ritual_run_command(&root, &binary, &ritual, json)?
         }
         Command::ListRitualSpecs { root, json } => list_ritual_specs_command(&root, json)?,
+        Command::UpdateRitualRunStatus { root, binary, ritual, status, finished_at } => {
+            update_ritual_run_status_command(&root, &binary, &ritual, &status, finished_at)?
+        }
     }
 
     Ok(())
@@ -1046,35 +1072,7 @@ fn list_ritual_runs_command(root: &str, binary_filter: Option<&str>, json: bool)
     let root_path = canonicalize_or_current(root)?;
     let layout = ritual_core::db::ProjectLayout::new(&root_path);
 
-    // Load DB runs first (authoritative).
-    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
-        format!("Failed to read project config at {}", layout.project_config_path.display())
-    })?;
-    let config: ritual_core::db::ProjectConfig =
-        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
-
-    let config_db_path = Path::new(&config.db.path);
-    let db_path = if config_db_path.is_absolute() {
-        config_db_path.to_path_buf()
-    } else {
-        layout.root.join(config_db_path)
-    };
-    let db = ritual_core::db::ProjectDb::open(&db_path)
-        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
-    let mut runs: Vec<RitualRunInfo> = db
-        .list_ritual_runs(binary_filter)
-        .unwrap_or_default()
-        .iter()
-        .map(|r| db_run_to_info(&layout, r))
-        .collect();
-
-    // Merge in on-disk runs not in DB.
-    let disk_runs = collect_ritual_runs_on_disk(&layout, binary_filter)?;
-    for dr in disk_runs {
-        if !runs.iter().any(|r| r.binary == dr.binary && r.name == dr.name) {
-            runs.push(dr);
-        }
-    }
+    let runs = load_runs_from_db_and_disk(&layout, binary_filter)?;
 
     if json {
         let serialized = serde_json::to_string_pretty(&runs)?;
@@ -1099,14 +1097,16 @@ fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: bool) -
     let root_path = canonicalize_or_current(root)?;
     let layout = ritual_core::db::ProjectLayout::new(&root_path);
     let run_root = layout.binary_output_root(binary).join(ritual);
-    if !run_root.is_dir() {
-        return Err(anyhow!("Ritual run not found at {}", run_root.display()));
-    }
 
+    // Load DB metadata if present.
+    let db_runs = load_runs_from_db(&layout, Some(binary)).unwrap_or_default();
+    let db_run = db_runs.into_iter().find(|r| r.ritual == ritual);
+
+    // Fallback to on-disk metadata if DB is missing the run.
     let spec_path = run_root.join("spec.yaml");
     let report_path = run_root.join("report.json");
     let metadata_path = run_root.join("run_metadata.json");
-    let metadata: Option<RitualRunMetadata> = if metadata_path.exists() {
+    let disk_metadata: Option<RitualRunMetadata> = if metadata_path.exists() {
         Some(
             serde_json::from_str(
                 &fs::read_to_string(&metadata_path)
@@ -1118,15 +1118,36 @@ fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: bool) -
         None
     };
 
+    if db_run.is_none() && !run_root.is_dir() {
+        return Err(anyhow!("Ritual run not found in DB or at {}", run_root.display()));
+    }
+
     if json {
-        let payload = serde_json::json!({
-            "binary": binary,
-            "ritual": ritual,
-            "path": run_root.display().to_string(),
-            "spec": spec_path.display().to_string(),
-            "report": report_path.display().to_string(),
-            "metadata": metadata,
-        });
+        let payload = if let Some(run) = db_run.clone() {
+            serde_json::json!({
+                "binary": run.binary,
+                "ritual": run.ritual,
+                "path": run_root.display().to_string(),
+                "spec": spec_path.display().to_string(),
+                "report": report_path.display().to_string(),
+                "metadata": {
+                    "spec_hash": run.spec_hash,
+                    "binary_hash": run.binary_hash,
+                    "status": run.status,
+                    "started_at": run.started_at,
+                    "finished_at": run.finished_at,
+                }
+            })
+        } else {
+            serde_json::json!({
+                "binary": binary,
+                "ritual": ritual,
+                "path": run_root.display().to_string(),
+                "spec": spec_path.display().to_string(),
+                "report": report_path.display().to_string(),
+                "metadata": disk_metadata,
+            })
+        };
         println!("{}", serde_json::to_string_pretty(&payload)?);
         return Ok(());
     }
@@ -1137,17 +1158,71 @@ fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: bool) -
     println!("  Path:   {}", run_root.display());
     println!("  Spec:   {}", spec_path.display());
     println!("  Report: {}", report_path.display());
-    if let Some(meta) = metadata {
-        println!("  Status: {}", meta.status);
-        if let Some(bh) = meta.binary_hash {
-            println!("  Binary hash: {}", bh);
+    match (db_run, disk_metadata) {
+        (Some(run), _) => {
+            println!("  Status: {}", run.status);
+            if let Some(bh) = run.binary_hash {
+                println!("  Binary hash: {}", bh);
+            }
+            println!("  Spec hash: {}", run.spec_hash);
+            println!("  Started:  {}", run.started_at);
+            println!("  Finished: {}", run.finished_at);
         }
-        println!("  Spec hash: {}", meta.spec_hash);
-        println!("  Started:  {}", meta.started_at);
-        println!("  Finished: {}", meta.finished_at);
-    } else {
-        println!("  (No run_metadata.json found)");
+        (None, Some(meta)) => {
+            println!("  Status: {}", meta.status);
+            if let Some(bh) = meta.binary_hash {
+                println!("  Binary hash: {}", bh);
+            }
+            println!("  Spec hash: {}", meta.spec_hash);
+            println!("  Started:  {}", meta.started_at);
+            println!("  Finished: {}", meta.finished_at);
+        }
+        _ => println!("  (No run metadata found in DB or disk)"),
     }
+
+    Ok(())
+}
+
+/// Update status of a ritual run in the DB.
+fn update_ritual_run_status_command(
+    root: &str,
+    binary: &str,
+    ritual: &str,
+    status: &str,
+    finished_at: Option<String>,
+) -> Result<()> {
+    validate_run_status(status)?;
+
+    let root_path = canonicalize_or_current(root)?;
+    let layout = ritual_core::db::ProjectLayout::new(&root_path);
+
+    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
+        format!("Failed to read project config at {}", layout.project_config_path.display())
+    })?;
+    let config: ritual_core::db::ProjectConfig =
+        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
+    let config_db_path = Path::new(&config.db.path);
+    let db_path = if config_db_path.is_absolute() {
+        config_db_path.to_path_buf()
+    } else {
+        layout.root.join(config_db_path)
+    };
+
+    let db = ritual_core::db::ProjectDb::open(&db_path)
+        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+    let finished_val = finished_at.unwrap_or_else(|| Utc::now().to_rfc3339());
+
+    let updated = db
+        .update_ritual_run_status(binary, ritual, status, Some(&finished_val))
+        .context("Failed to update ritual run status")?;
+    if updated == 0 {
+        return Err(anyhow!("No ritual run found for binary '{}' and ritual '{}'", binary, ritual));
+    }
+
+    println!(
+        "Updated ritual run status: binary='{}' ritual='{}' status='{}' finished_at='{}'",
+        binary, ritual, status, finished_val
+    );
 
     Ok(())
 }
@@ -1319,6 +1394,57 @@ fn collect_ritual_specs(dir: &Path) -> Result<Vec<RitualSpecInfo>> {
 
     specs.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(specs)
+}
+
+fn load_runs_from_db(
+    layout: &ritual_core::db::ProjectLayout,
+    binary_filter: Option<&str>,
+) -> Result<Vec<ritual_core::db::RitualRunRecord>> {
+    let config_json = fs::read_to_string(&layout.project_config_path).with_context(|| {
+        format!("Failed to read project config at {}", layout.project_config_path.display())
+    })?;
+    let config: ritual_core::db::ProjectConfig =
+        serde_json::from_str(&config_json).context("Failed to parse project config JSON")?;
+
+    let config_db_path = Path::new(&config.db.path);
+    let db_path = if config_db_path.is_absolute() {
+        config_db_path.to_path_buf()
+    } else {
+        layout.root.join(config_db_path)
+    };
+    let db = ritual_core::db::ProjectDb::open(&db_path)
+        .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
+
+    Ok(db.list_ritual_runs(binary_filter).unwrap_or_default())
+}
+
+fn load_runs_from_db_and_disk(
+    layout: &ritual_core::db::ProjectLayout,
+    binary_filter: Option<&str>,
+) -> Result<Vec<RitualRunInfo>> {
+    let mut runs: Vec<RitualRunInfo> = load_runs_from_db(layout, binary_filter)?
+        .iter()
+        .map(|r| db_run_to_info(layout, r))
+        .collect();
+
+    // Merge in on-disk runs not in DB.
+    let disk_runs = collect_ritual_runs_on_disk(layout, binary_filter)?;
+    for dr in disk_runs {
+        if !runs.iter().any(|r| r.binary == dr.binary && r.name == dr.name) {
+            runs.push(dr);
+        }
+    }
+    runs.sort_by(|a, b| a.name.cmp(&b.name).then(a.binary.cmp(&b.binary)));
+    Ok(runs)
+}
+
+fn validate_run_status(status: &str) -> Result<()> {
+    const ALLOWED: &[&str] = &["pending", "running", "succeeded", "failed", "canceled", "stubbed"];
+    if ALLOWED.contains(&status) {
+        Ok(())
+    } else {
+        Err(anyhow!("Invalid status '{}'. Allowed: {:?}", status, ALLOWED))
+    }
 }
 
 /// Helper to print whether a directory exists.

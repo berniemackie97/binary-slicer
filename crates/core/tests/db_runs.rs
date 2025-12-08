@@ -40,6 +40,15 @@ fn ritual_runs_insert_and_list_round_trip() {
     assert_eq!(only_a.len(), 1);
     assert_eq!(only_a[0].binary, "BinA");
     assert_eq!(only_a[0].binary_hash.as_deref(), Some("binhashA"));
+
+    // Update status and finished_at.
+    let updated = db
+        .update_ritual_run_status("BinA", "Run1", "succeeded", Some("t9"))
+        .expect("update status");
+    assert_eq!(updated, 1);
+    let only_a_after = db.list_ritual_runs(Some("BinA")).expect("filter runs");
+    assert_eq!(only_a_after[0].status, "succeeded");
+    assert_eq!(only_a_after[0].finished_at, "t9");
 }
 
 #[test]

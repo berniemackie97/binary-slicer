@@ -199,6 +199,124 @@ roots: [start]
     assert_eq!(v["ritual_runs"][0]["name"], "InfoRun");
 }
 
+/// `update-ritual-run-status` should validate and persist status updates.
+#[test]
+fn update_ritual_run_status_updates_db() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let bin_path = root.join("libStatus.so");
+    fs::write(&bin_path, b"dummy").expect("write binary");
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("StatusBin")
+        .assert()
+        .success();
+
+    let spec_path = root.join("status.yaml");
+    let spec_yaml = r#"name: StatusRun
+binary: StatusBin
+roots: [entry_point]
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .success();
+
+    // Update status to succeeded.
+    cargo_bin_cmd!("binary-slicer")
+        .arg("update-ritual-run-status")
+        .arg("--root")
+        .arg(root)
+        .arg("--binary")
+        .arg("StatusBin")
+        .arg("--ritual")
+        .arg("StatusRun")
+        .arg("--status")
+        .arg("succeeded")
+        .assert()
+        .success();
+
+    let output = cargo_bin_cmd!("binary-slicer")
+        .arg("list-ritual-runs")
+        .arg("--root")
+        .arg(root)
+        .arg("--binary")
+        .arg("StatusBin")
+        .arg("--json")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let runs: Vec<serde_json::Value> = serde_json::from_slice(&output).expect("parse runs json");
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0]["status"], "succeeded");
+}
+
+/// `update-ritual-run-status` should reject invalid statuses.
+#[test]
+fn update_ritual_run_status_rejects_invalid_status() {
+    let temp = tempdir().expect("temp dir");
+    let root = temp.path();
+    cargo_bin_cmd!("binary-slicer").arg("init-project").arg("--root").arg(root).assert().success();
+
+    let bin_path = root.join("libStatus2.so");
+    fs::write(&bin_path, b"dummy").expect("write binary");
+    cargo_bin_cmd!("binary-slicer")
+        .arg("add-binary")
+        .arg("--root")
+        .arg(root)
+        .arg("--path")
+        .arg(&bin_path)
+        .arg("--name")
+        .arg("StatusBin2")
+        .assert()
+        .success();
+
+    let spec_path = root.join("status2.yaml");
+    let spec_yaml = r#"name: StatusRun2
+binary: StatusBin2
+roots: [entry_point]
+"#;
+    fs::write(&spec_path, spec_yaml).expect("write spec");
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("run-ritual")
+        .arg("--root")
+        .arg(root)
+        .arg("--file")
+        .arg(&spec_path)
+        .assert()
+        .success();
+
+    cargo_bin_cmd!("binary-slicer")
+        .arg("update-ritual-run-status")
+        .arg("--root")
+        .arg(root)
+        .arg("--binary")
+        .arg("StatusBin2")
+        .arg("--ritual")
+        .arg("StatusRun2")
+        .arg("--status")
+        .arg("not-a-status")
+        .assert()
+        .failure();
+}
+
 /// `add-binary` should fail when the target binary path does not exist.
 #[test]
 fn add_binary_fails_for_missing_file() {
