@@ -169,5 +169,9 @@ impl AnalysisBackend for ValidateOnlyBackend {
 pub fn default_backend_registry() -> BackendRegistry {
     let mut registry = BackendRegistry::new();
     registry.register(ValidateOnlyBackend);
+    #[cfg(feature = "capstone-backend")]
+    {
+        registry.register(crate::services::backends::CapstoneBackend);
+    }
     registry
 }

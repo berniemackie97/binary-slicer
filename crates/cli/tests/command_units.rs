@@ -1,10 +1,10 @@
 use binary_slicer::commands::{
     add_binary_command, clean_outputs_command, collect_ritual_runs_on_disk, collect_ritual_specs,
     emit_slice_docs_command, emit_slice_reports_command, init_project_command, init_slice_command,
-    list_binaries_command, list_ritual_runs_command, list_ritual_specs_command,
-    list_slices_command, project_info_command, rerun_ritual_command, run_ritual_command,
-    sha256_bytes, show_ritual_run_command, update_ritual_run_status_command, validate_run_status,
-    RitualRunMetadata, RitualSpec,
+    list_backends_command, list_binaries_command, list_ritual_runs_command,
+    list_ritual_specs_command, list_slices_command, project_info_command, rerun_ritual_command,
+    run_ritual_command, sha256_bytes, show_ritual_run_command, update_ritual_run_status_command,
+    validate_run_status, RitualRunMetadata, RitualSpec,
 };
 use ritual_core::db::RitualRunStatus;
 use tempfile::tempdir;
@@ -203,6 +203,8 @@ fn list_commands_handle_empty_sets_and_json() {
     init_project_command(&root, Some("ListProj".into())).unwrap();
     list_slices_command(&root, true).unwrap();
     list_binaries_command(&root, true).unwrap();
+    // backends list should always succeed
+    list_backends_command(true).unwrap();
 }
 
 #[test]
@@ -283,6 +285,13 @@ fn run_ritual_errors_on_unknown_backend() {
         "name: BackendRun\nbinary: BinBK\nroots: [entry_point]\nmax_depth: 1\n",
     )
     .unwrap();
+
+    // Mutate config to set a default backend to ensure precedence still allows CLI override.
+    let config_path = ritual_core::db::ProjectLayout::new(&root).project_config_path;
+    let mut config: ritual_core::db::ProjectConfig =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    config.default_backend = Some("validate-only".into());
+    std::fs::write(&config_path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
 
     let err =
         run_ritual_command(&root, spec_path.to_str().unwrap(), Some("missing-backend"), false)

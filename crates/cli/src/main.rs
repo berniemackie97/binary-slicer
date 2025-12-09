@@ -263,6 +263,13 @@ enum Command {
         #[arg(long, default_value_t = false)]
         force: bool,
     },
+
+    /// List available analysis backends (human or JSON).
+    ListBackends {
+        /// Emit JSON instead of human-readable text.
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -317,6 +324,7 @@ fn main() -> Result<()> {
                 force,
             )?
         }
+        Command::ListBackends { json } => commands::list_backends_command(json)?,
     }
 
     Ok(())

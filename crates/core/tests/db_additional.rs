@@ -42,6 +42,21 @@ fn project_snapshot_round_trip() {
     assert_eq!(de.slices.len(), 1);
 }
 
+/// ProjectConfig should tolerate optional default_backend.
+#[test]
+fn project_config_default_backend_round_trip() {
+    let mut config = ProjectConfig::new("proj", "db.sqlite");
+    config.default_backend = Some("validate-only".into());
+    let json = serde_json::to_string(&config).expect("serialize config");
+    let de: ProjectConfig = serde_json::from_str(&json).expect("deserialize config");
+    assert_eq!(de.default_backend.as_deref(), Some("validate-only"));
+
+    // Missing field should default to None.
+    let minimal = r#"{ "name": "proj", "config_version": "0.1.0", "db": { "path": "db.sqlite" } }"#;
+    let de2: ProjectConfig = serde_json::from_str(minimal).expect("deserialize minimal config");
+    assert!(de2.default_backend.is_none());
+}
+
 /// RitualRunRecord should round-trip via serde.
 #[test]
 fn ritual_run_record_round_trip() {

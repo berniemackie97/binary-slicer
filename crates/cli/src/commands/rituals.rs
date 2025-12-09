@@ -191,6 +191,7 @@ pub fn run_ritual_command(
     // Choose backend (CLI override > spec > default), then persist normalized spec copy.
     let backend_name = backend_override
         .map(|s| s.to_string())
+        .or_else(|| config.default_backend.clone())
         .or_else(|| spec.backend.clone())
         .unwrap_or_else(default_backend_name);
     let mut spec_copy = spec;
@@ -351,6 +352,7 @@ pub fn rerun_ritual_command(
     // Choose backend (CLI override > spec > default), then write normalized spec copy.
     let backend_name = backend_override
         .map(|s| s.to_string())
+        .or_else(|| config.default_backend.clone())
         .or_else(|| spec.backend.clone())
         .unwrap_or_else(default_backend_name);
     if spec.outputs.is_none() {

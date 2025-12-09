@@ -29,6 +29,9 @@ pub struct ProjectConfig {
     pub config_version: String,
     /// Database configuration (path is typically relative to project root).
     pub db: DbConfig,
+    /// Optional default analysis backend to use when none is provided in CLI or spec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_backend: Option<String>,
 }
 
 impl ProjectConfig {
@@ -39,6 +42,7 @@ impl ProjectConfig {
             description: None,
             config_version: "0.1.0".to_string(),
             db: DbConfig::new(db_path),
+            default_backend: None,
         }
     }
 }

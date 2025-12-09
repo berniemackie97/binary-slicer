@@ -12,6 +12,7 @@ Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of na
 - Persistent project database (`.ritual/project.db`) and config (`.ritual/project.json`).
 - CLI scaffolding for projects, binaries, slices, and ritual runs:
   - `init-project` creates `.ritual`, docs/reports/graphs dirs, config, and DB.
+  - `list-backends` shows available analysis backends (defaults to `validate-only` until rizin/Capstone/Ghidra are wired).
   - `add-binary` registers binaries with arch + SHA-256 (or user-provided) hash.
   - `init-slice` inserts slice records and scaffolds docs under `docs/slices/<Name>.md`.
   - `emit-slice-docs` / `emit-slice-reports` regenerate docs and JSON reports from the DB.
@@ -30,7 +31,7 @@ Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of na
 
 Planned next milestones:
 - Ritual DSL to declare roots/boundaries and traversal rules.
-- Capstone/rizin backends feeding a common IR (functions, xrefs, CFG).
+- Capstone/rizin backends feeding a common IR (functions, xrefs, CFG). A starter Capstone backend is available behind `ritual-core` feature `capstone-backend`.
 - Slice doc/report/graph generation from the DB + analysis runs (now stubbed, later populated).
 - Import/export hooks for IDA/Ghidra/rizin annotations.
 
@@ -67,6 +68,7 @@ binary-slicer emit-slice-reports --root /path/to/workdir
 
 # 7) Run a ritual spec (analysis stub) - stores normalized spec + report under outputs/binaries/<bin>/<ritual>/
 #    You can choose a backend with --backend <name>; currently `validate-only` is available by default.
+#    If you compile with feature `capstone-backend`, `capstone` will appear in list-backends.
 cat > /path/to/workdir/rituals/telemetry.yaml <<'YAML'
 name: TelemetryRun
 binary: DemoBin
@@ -92,15 +94,19 @@ binary-slicer list-ritual-specs --root /path/to/workdir --json
 binary-slicer show-ritual-run --root /path/to/workdir --binary DemoBin --ritual TelemetryRun
 binary-slicer show-ritual-run --root /path/to/workdir --binary DemoBin --ritual TelemetryRun --json
 
-# 11) Update run status in the DB
+# 11) List available backends (human/JSON)
+binary-slicer list-backends
+binary-slicer list-backends --json
+
+# 12) Update run status in the DB
 binary-slicer update-ritual-run-status --root /path/to/workdir --binary DemoBin --ritual TelemetryRun --status succeeded
 Allowed statuses: pending, running, succeeded, failed, canceled, stubbed.
 
-# 12) Rerun an existing ritual using its normalized spec
+# 13) Rerun an existing ritual using its normalized spec
 binary-slicer rerun-ritual --root /path/to/workdir --binary DemoBin --ritual TelemetryRun --as-name TelemetryRun2
 # add --force to overwrite if the target run directory already exists
 
-# 13) Clean outputs (requires --yes; scope by binary/ritual or --all)
+# 14) Clean outputs (requires --yes; scope by binary/ritual or --all)
 binary-slicer clean-outputs --root /path/to/workdir --binary DemoBin --yes
 binary-slicer clean-outputs --root /path/to/workdir --binary DemoBin --ritual TelemetryRun --yes
 binary-slicer clean-outputs --root /path/to/workdir --all --yes
@@ -113,7 +119,7 @@ Slice docs live at `docs/slices/<Name>.md` and are meant to be edited by humans 
 ```
 <root>/
   .ritual/
-    project.json   # project config (name, db path)
+    project.json   # project config (name, db path, optional default_backend)
     project.db     # persistent SQLite DB (binaries, slices, future evidence)
   docs/
     slices/        # per-slice Markdown scaffolds
