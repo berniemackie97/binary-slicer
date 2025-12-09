@@ -1,6 +1,7 @@
 #![cfg(feature = "capstone-backend")]
 
 use std::path::PathBuf;
+#[cfg(target_os = "windows")]
 use std::process::Command;
 
 use object::write::{Object, Symbol, SymbolSection};
