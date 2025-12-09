@@ -15,7 +15,7 @@ impl AnalysisBackend for RizinBackend {
         }
 
         // Capture rizin version as evidence; if rizin is missing, surface a backend error.
-        let version = version_string().map_err(|e| AnalysisError::Backend(e))?;
+        let version = version_string().map_err(AnalysisError::Backend)?;
 
         let functions: Vec<FunctionRecord> = request
             .roots
