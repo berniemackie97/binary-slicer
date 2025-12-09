@@ -84,7 +84,11 @@ jobs:
 
       - name: Build & test (json output)
         run: |
-          cargo test --workspace --all-targets --locked -- -Z unstable-options --format json --report-time | cargo2junit > junit.xml
+          cargo test --workspace --all-targets --locked -- -Z unstable-options --format json --report-time > test-output.json
+          if ! cargo2junit < test-output.json > junit.xml; then
+            echo "cargo2junit failed to parse output; producing empty report"
+            echo '<testsuites></testsuites>' > junit.xml
+          fi
 
       - name: Upload test report (JUnit)
         uses: actions/upload-artifact@v4
