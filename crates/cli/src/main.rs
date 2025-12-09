@@ -270,6 +270,29 @@ enum Command {
         #[arg(long, default_value_t = false)]
         json: bool,
     },
+
+    /// Detect and configure a backend tool path, optionally setting default backend.
+    SetupBackend {
+        /// Project root directory. Defaults to the current working directory.
+        #[arg(long, default_value = ".")]
+        root: String,
+
+        /// Backend to configure (e.g., rizin, ghidra).
+        #[arg(long)]
+        backend: String,
+
+        /// Optional explicit tool path (e.g., path to rizin or analyzeHeadless).
+        #[arg(long)]
+        path: Option<String>,
+
+        /// Set this backend as the project default.
+        #[arg(long, default_value_t = false)]
+        set_default: bool,
+
+        /// Append the resolved tool directory to your shell profile PATH.
+        #[arg(long, default_value_t = false)]
+        write_path: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -325,6 +348,9 @@ fn main() -> Result<()> {
             )?
         }
         Command::ListBackends { json } => commands::list_backends_command(json)?,
+        Command::SetupBackend { root, backend, path, set_default, write_path } => {
+            commands::setup_backend_command(&root, &backend, path, set_default, write_path)?
+        }
     }
 
     Ok(())

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::Serialize;
 
+use ritual_core::db::BackendPaths;
 use ritual_core::services::analysis::default_backend_registry;
 
 #[derive(Debug, Serialize)]
@@ -49,4 +50,9 @@ pub fn list_backends_command(json: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Best-effort detection of configured backend tool paths from project config.
+pub fn configured_backend_paths(config: &ritual_core::db::ProjectConfig) -> BackendPaths {
+    config.backends.clone()
 }

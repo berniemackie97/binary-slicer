@@ -5,7 +5,7 @@ pub mod models;
 pub mod project_db;
 pub mod util;
 
-pub use config::{DbConfig, ProjectConfig};
+pub use config::{BackendPaths, DbConfig, ProjectConfig};
 pub use context::ProjectContext;
 pub use layout::ProjectLayout;
 pub use models::{

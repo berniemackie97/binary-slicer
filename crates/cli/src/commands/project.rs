@@ -14,6 +14,7 @@ pub struct ProjectInfoSnapshot {
     pub db_path: String,
     pub default_backend: Option<String>,
     pub available_backends: Vec<String>,
+    pub backends: ritual_core::db::BackendPaths,
     pub layout: ProjectInfoLayout,
     pub binaries: Vec<ritual_core::db::BinaryRecord>,
     pub slices: Vec<ritual_core::db::SliceRecord>,
@@ -132,6 +133,7 @@ pub fn project_info_command(root: &str, json: bool) -> Result<()> {
             db_path: config.db.path.clone(),
             default_backend: config.default_backend.clone(),
             available_backends: available_backends.clone(),
+            backends: config.backends.clone(),
             layout: ProjectInfoLayout {
                 meta_dir: layout.meta_dir.display().to_string(),
                 docs_dir: layout.docs_dir.display().to_string(),

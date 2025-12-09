@@ -32,6 +32,9 @@ pub struct ProjectConfig {
     /// Optional default analysis backend to use when none is provided in CLI or spec.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_backend: Option<String>,
+    /// Optional per-backend tool paths.
+    #[serde(default, skip_serializing_if = "BackendPaths::is_empty")]
+    pub backends: BackendPaths,
 }
 
 impl ProjectConfig {
@@ -43,6 +46,22 @@ impl ProjectConfig {
             config_version: "0.1.0".to_string(),
             db: DbConfig::new(db_path),
             default_backend: None,
+            backends: BackendPaths::default(),
         }
+    }
+}
+
+/// Optional tool paths for analysis backends.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BackendPaths {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rizin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ghidra_headless: Option<String>,
+}
+
+impl BackendPaths {
+    pub fn is_empty(&self) -> bool {
+        self.rizin.is_none() && self.ghidra_headless.is_none()
     }
 }

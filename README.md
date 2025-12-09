@@ -17,8 +17,9 @@ Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of na
   - `init-slice` inserts slice records and scaffolds docs under `docs/slices/<Name>.md`.
   - `emit-slice-docs` / `emit-slice-reports` regenerate docs and JSON reports from the DB.
   - `list-slices` / `list-binaries` show stored metadata (human or JSON).
-  - `project-info` reports core paths and directory health (human or JSON).
+- `project-info` reports core paths and directory health (human or JSON).
     - JSON includes `available_backends` and optional `default_backend` (settable in `.ritual/project.json`).
+    - `backends` field records configured tool paths (rizin, ghidra headless) if set via `setup-backend`.
   - `run-ritual` loads a ritual spec (YAML/JSON), validates it, and creates a per-binary output scaffold under `outputs/binaries/<binary>/<ritual>/` (use `--force` to overwrite an existing run). Emits `spec.yaml`, `report.json`, and `run_metadata.json` (hashes + timestamps).
   - `list-ritual-specs` lists ritual specs under `rituals/` (human/JSON).
   - `list-ritual-runs` enumerates runs discovered under `outputs/binaries` (human/JSON).
@@ -99,15 +100,19 @@ binary-slicer show-ritual-run --root /path/to/workdir --binary DemoBin --ritual 
 binary-slicer list-backends
 binary-slicer list-backends --json
 
-# 12) Update run status in the DB
+# 12) Setup a backend path (records tool path in project config)
+binary-slicer setup-backend --root /path/to/workdir --backend rizin --path /usr/bin/rizin --set-default
+# add --write-path to append the tool directory to your shell profile PATH
+
+# 13) Update run status in the DB
 binary-slicer update-ritual-run-status --root /path/to/workdir --binary DemoBin --ritual TelemetryRun --status succeeded
 Allowed statuses: pending, running, succeeded, failed, canceled, stubbed.
 
-# 13) Rerun an existing ritual using its normalized spec
+# 14) Rerun an existing ritual using its normalized spec
 binary-slicer rerun-ritual --root /path/to/workdir --binary DemoBin --ritual TelemetryRun --as-name TelemetryRun2
 # add --force to overwrite if the target run directory already exists
 
-# 14) Clean outputs (requires --yes; scope by binary/ritual or --all)
+# 15) Clean outputs (requires --yes; scope by binary/ritual or --all)
 binary-slicer clean-outputs --root /path/to/workdir --binary DemoBin --yes
 binary-slicer clean-outputs --root /path/to/workdir --binary DemoBin --ritual TelemetryRun --yes
 binary-slicer clean-outputs --root /path/to/workdir --all --yes
@@ -120,6 +125,7 @@ Slice docs live at `docs/slices/<Name>.md` and are meant to be edited by humans 
 - `capstone-backend`: enables a Capstone-based backend (x86_64 demo) and makes it available via `--backend capstone`.
 - `rizin-backend`: registers a rizin-backed analyzer that validates the binary and captures `rizin -v` as evidence; ensure `rizin` is installed and on PATH.
 - `ghidra-backend`: registers a Ghidra headless stub (requires `GHIDRA_ANALYZE_HEADLESS` pointing to `analyzeHeadless` or `GHIDRA_INSTALL_DIR`); Ghidra version is recorded as evidence.
+- `setup-backend` can record tool paths in `.ritual/project.json` (and set `default_backend`), and optionally append the tool directory to your shell profile PATH (`--write-path`). It never installs software silently.
 
 ## Project layout
 
