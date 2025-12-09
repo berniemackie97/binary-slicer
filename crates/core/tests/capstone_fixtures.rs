@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use object::write::Objectection;
+use object::write::{Object, Symbol, SymbolSection};
 use object::{
     Architecture, BinaryFormat, Endianness, SectionKind, SymbolFlags, SymbolKind, SymbolScope,
 };
