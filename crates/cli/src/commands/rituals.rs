@@ -14,13 +14,53 @@ use crate::commands::{
     validate_run_status,
 };
 use ritual_core::services::analysis::{
-    default_backend_registry, AnalysisOptions, AnalysisRequest, RitualRunner, RunMetadata,
+    default_backend_registry, AnalysisOptions, AnalysisRequest, AnalysisResult, BlockEdgeKind,
+    RitualRunner, RunMetadata,
 };
 
 const DEFAULT_BACKEND_NAME: &str = "validate-only";
 
 fn default_backend_name() -> String {
     DEFAULT_BACKEND_NAME.to_string()
+}
+
+fn render_dot(result: &AnalysisResult) -> String {
+    let mut out = String::from("digraph G {\n  rankdir=LR;\n");
+    if result.functions.is_empty() && result.call_edges.is_empty() && result.basic_blocks.is_empty()
+    {
+        out.push_str("  // no graph data available\n}\n");
+        return out;
+    }
+    for func in &result.functions {
+        let label =
+            func.name.clone().unwrap_or_else(|| format!("0x{:X}", func.address));
+        out.push_str(&format!("  f_{:X} [label=\"{}\" shape=box];\n", func.address, label));
+    }
+    for edge in &result.call_edges {
+        out.push_str(&format!("  f_{:X} -> f_{:X} [label=\"call\"];\n", edge.from, edge.to));
+    }
+    for bb in &result.basic_blocks {
+        out.push_str(&format!(
+            "  bb_{:X} [label=\"bb 0x{:X}\\nlen={}\" shape=ellipse];\n",
+            bb.start, bb.start, bb.len
+        ));
+        for succ in &bb.successors {
+            let label = match succ.kind {
+                BlockEdgeKind::Fallthrough => "fallthrough",
+                BlockEdgeKind::Jump => "jump",
+                BlockEdgeKind::ConditionalJump => "cjump",
+                BlockEdgeKind::IndirectJump => "ijump",
+                BlockEdgeKind::Call => "call",
+                BlockEdgeKind::IndirectCall => "icall",
+            };
+            out.push_str(&format!(
+                "  bb_{:X} -> bb_{:X} [label=\"{}\"];\n",
+                bb.start, succ.target, label
+            ));
+        }
+    }
+    out.push_str("}\n");
+    out
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -56,6 +96,10 @@ pub struct RitualRunMetadata {
     pub binary_hash: Option<String>,
     #[serde(default = "default_backend_name")]
     pub backend: String,
+    #[serde(default)]
+    pub backend_version: Option<String>,
+    #[serde(default)]
+    pub backend_path: Option<String>,
     pub started_at: String,
     pub finished_at: String,
     pub status: RitualRunStatus,
@@ -71,6 +115,7 @@ pub struct RitualRunInfo {
     pub status: Option<String>,
     pub spec_hash: Option<String>,
     pub backend: Option<String>,
+    pub backend_version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -115,6 +160,7 @@ pub fn db_run_to_info(
         status: Some(rec.status.as_str().to_string()),
         spec_hash: Some(rec.spec_hash.clone()),
         backend: Some(rec.backend.clone()),
+        backend_version: rec.backend_version.clone(),
     }
 }
 
@@ -215,10 +261,12 @@ pub fn run_ritual_command(
         binary_name: target_bin.name.clone(),
         binary_path: binary_path.clone(),
         roots: spec_copy.roots.clone(),
+        arch: target_bin.arch.clone(),
         options: AnalysisOptions {
             max_depth: spec_copy.max_depth,
             include_imports: false,
             include_strings: false,
+            max_instructions: Some(1024),
         },
     };
     let ctx = ritual_core::db::ProjectContext {
@@ -232,6 +280,8 @@ pub fn run_ritual_command(
         spec_hash: spec_hash.clone(),
         binary_hash: binary_hash.clone(),
         backend: backend_name.clone(),
+        backend_version: None,
+        backend_path: None,
         status: RitualRunStatus::Stubbed,
     };
     let analysis_result = runner.run(&request, &run_meta)?;
@@ -245,8 +295,11 @@ pub fn run_ritual_command(
         "max_depth": spec_copy.max_depth,
         "status": run_meta.status.as_str(),
         "backend": backend_name,
+        "backend_version": analysis_result.backend_version.clone(),
+        "backend_path": analysis_result.backend_path.clone(),
         "functions": analysis_result.functions,
         "edges": analysis_result.call_edges,
+        "basic_blocks": analysis_result.basic_blocks,
         "evidence": analysis_result.evidence,
     });
     fs::write(&report_path, serde_json::to_string_pretty(&report)?)
@@ -260,6 +313,8 @@ pub fn run_ritual_command(
         spec_hash,
         binary_hash,
         backend: backend_name,
+        backend_version: analysis_result.backend_version.clone(),
+        backend_path: analysis_result.backend_path.clone(),
         started_at: now.clone(),
         finished_at: now,
         status: run_meta.status,
@@ -267,6 +322,12 @@ pub fn run_ritual_command(
     let metadata_path = run_output_root.join("run_metadata.json");
     fs::write(&metadata_path, serde_json::to_string_pretty(&metadata)?)
         .with_context(|| format!("Failed to write run metadata at {}", metadata_path.display()))?;
+
+    // Write graph DOT (best-effort even if sparse).
+    let dot = render_dot(&analysis_result);
+    let dot_path = run_output_root.join("graph.dot");
+    fs::write(&dot_path, dot)
+        .with_context(|| format!("Failed to write ritual graph at {}", dot_path.display()))?;
 
     println!("Ran ritual (stub): {}", spec_copy.name);
     println!("  Binary: {}", target_bin.name);
@@ -375,10 +436,12 @@ pub fn rerun_ritual_command(
         binary_name: target_bin.name.clone(),
         binary_path: binary_path.clone(),
         roots: spec.roots.clone(),
+        arch: target_bin.arch.clone(),
         options: AnalysisOptions {
             max_depth: spec.max_depth,
             include_imports: false,
             include_strings: false,
+            max_instructions: Some(1024),
         },
     };
     let ctx = ritual_core::db::ProjectContext {
@@ -392,6 +455,8 @@ pub fn rerun_ritual_command(
         spec_hash: spec_hash.clone(),
         binary_hash: binary_hash.clone(),
         backend: backend_name.clone(),
+        backend_version: None,
+        backend_path: None,
         status: RitualRunStatus::Stubbed,
     };
     let analysis_result = runner.run(&request, &run_meta)?;
@@ -405,8 +470,11 @@ pub fn rerun_ritual_command(
         "max_depth": spec.max_depth,
         "status": run_meta.status.as_str(),
         "backend": backend_name,
+        "backend_version": analysis_result.backend_version.clone(),
+        "backend_path": analysis_result.backend_path.clone(),
         "functions": analysis_result.functions,
         "edges": analysis_result.call_edges,
+        "basic_blocks": analysis_result.basic_blocks,
         "evidence": analysis_result.evidence,
     });
     fs::write(&report_path, serde_json::to_string_pretty(&report)?)
@@ -420,6 +488,8 @@ pub fn rerun_ritual_command(
         spec_hash,
         binary_hash,
         backend: backend_name,
+        backend_version: analysis_result.backend_version.clone(),
+        backend_path: analysis_result.backend_path.clone(),
         started_at: now.clone(),
         finished_at: now,
         status: RitualRunStatus::Stubbed,
@@ -427,6 +497,11 @@ pub fn rerun_ritual_command(
     let metadata_path = new_run_root.join("run_metadata.json");
     fs::write(&metadata_path, serde_json::to_string_pretty(&metadata)?)
         .with_context(|| format!("Failed to write run metadata at {}", metadata_path.display()))?;
+
+    let dot = render_dot(&analysis_result);
+    let dot_path = new_run_root.join("graph.dot");
+    fs::write(&dot_path, dot)
+        .with_context(|| format!("Failed to write ritual graph at {}", dot_path.display()))?;
 
     println!("Reran ritual (stub): {} -> {}", ritual, as_name);
     println!("  Binary: {}", target_bin.name);
@@ -551,6 +626,7 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
                     "spec_hash": run.spec_hash,
                     "binary_hash": run.binary_hash,
                     "backend": run.backend,
+                    "backend_version": run.backend_version,
                     "status": run.status.as_str(),
                     "started_at": run.started_at,
                     "finished_at": run.finished_at,
@@ -584,6 +660,9 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
             }
             println!("  Spec hash: {}", run.spec_hash);
             println!("  Backend: {}", run.backend);
+            if let Some(ver) = run.backend_version {
+                println!("  Backend version: {}", ver);
+            }
             println!("  Started:  {}", run.started_at);
             println!("  Finished: {}", run.finished_at);
         }
@@ -594,6 +673,9 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
             }
             println!("  Spec hash: {}", meta.spec_hash);
             println!("  Backend: {}", meta.backend);
+            if let Some(ver) = &meta.backend_version {
+                println!("  Backend version: {}", ver);
+            }
             println!("  Started:  {}", meta.started_at);
             println!("  Finished: {}", meta.finished_at);
         }

@@ -1,0 +1,15 @@
+name: DemoRun
+binary: CQ2
+roots:
+- '0x49BF04'
+- '0x6CC'
+- '0x6DC'
+- '0x6EC'
+- '0x6FC'
+max_depth: 3
+backend: capstone
+description: null
+outputs:
+  reports: true
+  graphs: true
+  docs: true

@@ -1,8 +1,8 @@
 {
-  "description": "Telemetry slice",
+  "description": "Demo slice for CQ2",
   "evidence": [],
   "functions": [],
-  "name": "Telemetry",
+  "name": "DemoSlice",
   "roots": [],
   "status": "Planned"
 }

@@ -26,6 +26,9 @@ impl AnalysisBackend for NoopBackend {
                 .collect(),
             call_edges: vec![],
             evidence: vec![EvidenceRecord { address: 0, description: "noop backend".into() }],
+            basic_blocks: vec![],
+            backend_version: Some("noop-1.0".into()),
+            backend_path: None,
         })
     }
 
@@ -68,7 +71,9 @@ fn ritual_runner_invokes_backend_and_inserts_run() {
             max_depth: Some(1),
             include_imports: false,
             include_strings: false,
+            max_instructions: Some(16),
         },
+        arch: None,
     };
 
     let runner = RitualRunner { ctx: &ctx, backend };
@@ -79,6 +84,8 @@ fn ritual_runner_invokes_backend_and_inserts_run() {
                 spec_hash: "hash123".into(),
                 binary_hash: Some("binhash".into()),
                 backend: "noop".into(),
+                backend_version: None,
+                backend_path: None,
                 status: ritual_core::db::RitualRunStatus::Succeeded,
             },
         )

@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::process::Command;
 
 use crate::services::analysis::{
@@ -31,12 +30,15 @@ impl AnalysisBackend for RizinBackend {
             })
             .collect();
 
-        let evidence = vec![EvidenceRecord { address: 0, description: version }];
+        let evidence = vec![EvidenceRecord { address: 0, description: version.clone() }];
 
         Ok(AnalysisResult {
             functions,
             call_edges: vec![CallEdge { from: 0, to: 0, is_cross_slice: false }],
             evidence,
+            basic_blocks: vec![],
+            backend_version: Some(version),
+            backend_path: None,
         })
     }
 

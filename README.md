@@ -12,7 +12,7 @@ Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of na
 - Persistent project database (`.ritual/project.db`) and config (`.ritual/project.json`).
 - CLI scaffolding for projects, binaries, slices, and ritual runs:
   - `init-project` creates `.ritual`, docs/reports/graphs dirs, config, and DB.
-  - `list-backends` shows available analysis backends (defaults to `validate-only` until rizin/Capstone/Ghidra are wired).
+  - `list-backends` shows available analysis backends (defaults to `validate-only`; enable optional Capstone/rizin/Ghidra backends via Cargo features).
   - `add-binary` registers binaries with arch + SHA-256 (or user-provided) hash.
   - `init-slice` inserts slice records and scaffolds docs under `docs/slices/<Name>.md`.
   - `emit-slice-docs` / `emit-slice-reports` regenerate docs and JSON reports from the DB.
@@ -21,11 +21,12 @@ Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of na
     - JSON includes `available_backends` and optional `default_backend` (settable in `.ritual/project.json`).
     - `backends` field records configured tool paths (rizin, ghidra headless) if set via `setup-backend`.
   - `run-ritual` loads a ritual spec (YAML/JSON), validates it, and creates a per-binary output scaffold under `outputs/binaries/<binary>/<ritual>/` (use `--force` to overwrite an existing run). Emits `spec.yaml`, `report.json`, and `run_metadata.json` (hashes + timestamps).
+    - Also writes `graph.dot` (call edges + basic blocks) based on backend results.
   - `list-ritual-specs` lists ritual specs under `rituals/` (human/JSON).
   - `list-ritual-runs` enumerates runs discovered under `outputs/binaries` (human/JSON).
   - `show-ritual-run` prints metadata/paths for a single run (human/JSON).
   - `update-ritual-run-status` updates run status in the DB (pending/running/succeeded/failed/canceled/stubbed).
-  - `rerun-ritual` reuses an existing run’s normalized spec to create a new run under a new name.
+  - `rerun-ritual` reuses an existing run's normalized spec to create a new run under a new name.
   - `clean-outputs` safely deletes run outputs (per binary, per ritual, or all) with `--yes`.
   - Run metadata is also persisted in the project DB (binary, ritual, hashes, status, timestamps) for easy querying.
 - Tests + coverage (`cargo llvm-cov --workspace --summary-only` with gates) and local CI scripts.
@@ -33,7 +34,7 @@ Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of na
 
 Planned next milestones:
 - Ritual DSL to declare roots/boundaries and traversal rules.
-- Capstone/rizin backends feeding a common IR (functions, xrefs, CFG). A starter Capstone backend is available behind `ritual-core` feature `capstone-backend`.
+- Capstone/rizin backends feeding a common IR (functions, xrefs, CFG). Capstone backend (feature `capstone-backend`) now disassembles symbol-aware functions, basic blocks, and call edges (ELF/PE/Mach-O section mapping); rizin integration is next.
 - Slice doc/report/graph generation from the DB + analysis runs (now stubbed, later populated).
 - Import/export hooks for IDA/Ghidra/rizin annotations.
 
@@ -70,7 +71,9 @@ binary-slicer emit-slice-reports --root /path/to/workdir
 
 # 7) Run a ritual spec (analysis stub) - stores normalized spec + report under outputs/binaries/<bin>/<ritual>/
 #    You can choose a backend with --backend <name>; currently `validate-only` is available by default.
-#    If you compile with feature `capstone-backend`, `capstone` will appear in list-backends.
+#    If you compile with feature `capstone-backend`, `capstone` will appear in list-backends and emit symbol-aware
+#    disassembly evidence, basic blocks, and call-edges for binaries with symbols (fallback whole-binary disassembly
+#    otherwise).
 cat > /path/to/workdir/rituals/telemetry.yaml <<'YAML'
 name: TelemetryRun
 binary: DemoBin
@@ -122,7 +125,7 @@ Slice docs live at `docs/slices/<Name>.md` and are meant to be edited by humans 
 
 ### Backend features
 
-- `capstone-backend`: enables a Capstone-based backend (x86_64 demo) and makes it available via `--backend capstone`.
+- `capstone-backend`: enables a Capstone-based backend (symbol-aware disassembly with basic blocks + call-edge extraction; ELF/PE/Mach-O section mapping) and makes it available via `--backend capstone`.
 - `rizin-backend`: registers a rizin-backed analyzer that validates the binary and captures `rizin -v` as evidence; ensure `rizin` is installed and on PATH.
 - `ghidra-backend`: registers a Ghidra headless stub (requires `GHIDRA_ANALYZE_HEADLESS` pointing to `analyzeHeadless` or `GHIDRA_INSTALL_DIR`); Ghidra version is recorded as evidence.
 - `setup-backend` can record tool paths in `.ritual/project.json` (and set `default_backend`), and optionally append the tool directory to your shell profile PATH (`--write-path`). It never installs software silently.

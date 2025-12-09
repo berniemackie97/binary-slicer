@@ -11,7 +11,7 @@ use crate::db::{BinaryRecord, RitualRunRecord, RitualRunStatus, SliceRecord, Sli
 const MIN_SUPPORTED_SCHEMA_VERSION: i32 = 0;
 
 /// Latest schema version this crate knows about.
-const CURRENT_SCHEMA_VERSION: i32 = 3;
+const CURRENT_SCHEMA_VERSION: i32 = 4;
 
 /// Error type for project database operations.
 #[derive(Debug, Error)]
@@ -133,8 +133,8 @@ impl ProjectDb {
     pub fn insert_ritual_run(&self, record: &RitualRunRecord) -> DbResult<i64> {
         self.conn.execute(
             r#"
-            INSERT INTO ritual_runs (binary, ritual, spec_hash, binary_hash, backend, status, started_at, finished_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            INSERT INTO ritual_runs (binary, ritual, spec_hash, binary_hash, backend, backend_version, backend_path, status, started_at, finished_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             "#,
             params![
                 record.binary,
@@ -142,6 +142,8 @@ impl ProjectDb {
                 record.spec_hash,
                 record.binary_hash,
                 record.backend,
+                record.backend_version,
+                record.backend_path,
                 record.status.as_str(),
                 record.started_at,
                 record.finished_at
@@ -159,19 +161,21 @@ impl ProjectDb {
                 spec_hash: row.get(2)?,
                 binary_hash: row.get(3)?,
                 backend: row.get(4)?,
+                backend_version: row.get(5).ok(),
+                backend_path: row.get(6).ok(),
                 status: {
-                    let s: String = row.get(5)?;
+                    let s: String = row.get(7)?;
                     s.parse::<RitualRunStatusString>()?.0
                 },
-                started_at: row.get(6)?,
-                finished_at: row.get(7)?,
+                started_at: row.get(8)?,
+                finished_at: row.get(9)?,
             })
         }
 
         let mut stmt = if binary.is_some() {
             self.conn.prepare(
                 r#"
-                SELECT binary, ritual, spec_hash, binary_hash, backend, status, started_at, finished_at
+                SELECT binary, ritual, spec_hash, binary_hash, backend, backend_version, backend_path, status, started_at, finished_at
                 FROM ritual_runs
                 WHERE binary = ?1
                 ORDER BY id
@@ -180,7 +184,7 @@ impl ProjectDb {
         } else {
             self.conn.prepare(
                 r#"
-                SELECT binary, ritual, spec_hash, binary_hash, backend, status, started_at, finished_at
+                SELECT binary, ritual, spec_hash, binary_hash, backend, backend_version, backend_path, status, started_at, finished_at
                 FROM ritual_runs
                 ORDER BY id
                 "#,
@@ -242,6 +246,7 @@ impl ProjectDb {
 /// - 1: initial schema (binaries, slices)
 /// - 2: add ritual_runs table
 /// - 3: add backend column to ritual_runs
+/// - 4: add backend_version, backend_path to ritual_runs
 fn apply_migrations(conn: &Connection) -> DbResult<()> {
     let current_version = current_schema_version(conn)?;
 
@@ -309,6 +314,18 @@ fn apply_migrations(conn: &Connection) -> DbResult<()> {
             -- existing rows get default; future inserts should provide backend
             UPDATE ritual_runs SET backend = 'validate-only' WHERE backend IS NULL;
             PRAGMA user_version = 3;
+            COMMIT;
+            "#,
+        )?;
+    }
+
+    if current_version < 4 {
+        conn.execute_batch(
+            r#"
+            BEGIN;
+            ALTER TABLE ritual_runs ADD COLUMN backend_version TEXT;
+            ALTER TABLE ritual_runs ADD COLUMN backend_path TEXT;
+            PRAGMA user_version = 4;
             COMMIT;
             "#,
         )?;

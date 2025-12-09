@@ -17,6 +17,8 @@ fn ritual_runs_insert_and_list_round_trip() {
         spec_hash: "specA".into(),
         binary_hash: Some("binhashA".into()),
         backend: "validate-only".into(),
+        backend_version: Some("v1".into()),
+        backend_path: Some("/bin/rizin".into()),
         status: ritual_core::db::RitualRunStatus::Stubbed,
         started_at: "t0".into(),
         finished_at: "t1".into(),
@@ -27,6 +29,8 @@ fn ritual_runs_insert_and_list_round_trip() {
         spec_hash: "specB".into(),
         binary_hash: None,
         backend: "validate-only".into(),
+        backend_version: None,
+        backend_path: None,
         status: ritual_core::db::RitualRunStatus::Stubbed,
         started_at: "t2".into(),
         finished_at: "t3".into(),
@@ -88,7 +92,7 @@ fn existing_schema_is_migrated_to_latest() {
     let db = ProjectDb::open(&db_path).expect("open and migrate");
     let version: i32 =
         db.connection().query_row("PRAGMA user_version;", [], |row| row.get(0)).unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 
     // Table should accept inserts post-migration.
     let run = RitualRunRecord {
@@ -97,6 +101,8 @@ fn existing_schema_is_migrated_to_latest() {
         spec_hash: "sh".into(),
         binary_hash: None,
         backend: "validate-only".into(),
+        backend_version: None,
+        backend_path: None,
         status: ritual_core::db::RitualRunStatus::Stubbed,
         started_at: "t".into(),
         finished_at: "t".into(),

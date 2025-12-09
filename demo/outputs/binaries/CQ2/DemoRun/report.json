@@ -1,0 +1,56 @@
+{
+  "backend": "capstone",
+  "backend_path": null,
+  "backend_version": "5.0",
+  "basic_blocks": [],
+  "binary": "CQ2",
+  "edges": [],
+  "evidence": [],
+  "functions": [
+    {
+      "address": 4096,
+      "in_slice": true,
+      "is_boundary": false,
+      "name": "0x49BF04",
+      "size": null
+    },
+    {
+      "address": 4097,
+      "in_slice": true,
+      "is_boundary": false,
+      "name": "0x6CC",
+      "size": null
+    },
+    {
+      "address": 4098,
+      "in_slice": true,
+      "is_boundary": false,
+      "name": "0x6DC",
+      "size": null
+    },
+    {
+      "address": 4099,
+      "in_slice": true,
+      "is_boundary": false,
+      "name": "0x6EC",
+      "size": null
+    },
+    {
+      "address": 4100,
+      "in_slice": true,
+      "is_boundary": false,
+      "name": "0x6FC",
+      "size": null
+    }
+  ],
+  "max_depth": 3,
+  "ritual": "DemoRun",
+  "roots": [
+    "0x49BF04",
+    "0x6CC",
+    "0x6DC",
+    "0x6EC",
+    "0x6FC"
+  ],
+  "status": "stubbed"
+}

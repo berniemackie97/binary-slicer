@@ -927,6 +927,10 @@ roots: [entry_point]
     assert!(meta["binary_hash"].as_str().is_some());
     assert!(meta["started_at"].as_str().is_some());
     assert!(meta["finished_at"].as_str().is_some());
+
+    // Graph artifact should exist (DOT).
+    let dot_path = run_root.join("graph.dot");
+    assert!(dot_path.is_file(), "graph.dot should be emitted");
 }
 
 /// `show-ritual-run` should print metadata and support JSON.

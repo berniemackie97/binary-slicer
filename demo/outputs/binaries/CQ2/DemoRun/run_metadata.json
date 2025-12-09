@@ -1,0 +1,12 @@
+{
+  "ritual": "DemoRun",
+  "binary": "CQ2",
+  "spec_hash": "08d3e0b2ab9ad2073ed6cdd7b07b253ee3f0e41fcd99729336168faa742e2045",
+  "binary_hash": "1bb9e4b0ce5691ad6f6aa9eaad825e764ab966c09ee90614c6451ffad8bae115",
+  "backend": "capstone",
+  "backend_version": "5.0",
+  "backend_path": null,
+  "started_at": "2025-12-09T05:49:41.727736600+00:00",
+  "finished_at": "2025-12-09T05:49:41.727736600+00:00",
+  "status": "stubbed"
+}

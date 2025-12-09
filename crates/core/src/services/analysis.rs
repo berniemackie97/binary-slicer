@@ -32,12 +32,41 @@ pub struct EvidenceRecord {
     pub description: String,
 }
 
+/// Kind of control-flow edge for a basic block successor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BlockEdgeKind {
+    Fallthrough,
+    Jump,
+    ConditionalJump,
+    IndirectJump,
+    Call,
+    IndirectCall,
+}
+
+/// Basic block representation for lightweight CFG export.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BasicBlock {
+    pub start: u64,
+    pub len: u32,
+    pub successors: Vec<BlockEdge>,
+}
+
+/// Successor edge with target and edge classification.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockEdge {
+    pub target: u64,
+    pub kind: BlockEdgeKind,
+}
+
 /// Result of analyzing a ritual specification against a binary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalysisResult {
     pub functions: Vec<FunctionRecord>,
     pub call_edges: Vec<CallEdge>,
     pub evidence: Vec<EvidenceRecord>,
+    pub basic_blocks: Vec<BasicBlock>,
+    pub backend_version: Option<String>,
+    pub backend_path: Option<String>,
 }
 
 /// Metadata to persist alongside an analysis run.
@@ -46,6 +75,8 @@ pub struct RunMetadata {
     pub spec_hash: String,
     pub binary_hash: Option<String>,
     pub backend: String,
+    pub backend_version: Option<String>,
+    pub backend_path: Option<String>,
     pub status: RitualRunStatus,
 }
 
@@ -55,6 +86,8 @@ pub struct AnalysisOptions {
     pub max_depth: Option<u32>,
     pub include_imports: bool,
     pub include_strings: bool,
+    /// Optional instruction budget for backends that disassemble.
+    pub max_instructions: Option<usize>,
 }
 
 /// Request to analyze a binary for a ritual.
@@ -64,6 +97,8 @@ pub struct AnalysisRequest {
     pub binary_name: String,
     pub binary_path: PathBuf,
     pub roots: Vec<String>,
+    /// Optional architecture hint (e.g., x86_64, arm64, armv7).
+    pub arch: Option<String>,
     pub options: AnalysisOptions,
 }
 
@@ -138,6 +173,8 @@ impl<'a> RitualRunner<'a> {
             spec_hash: meta.spec_hash.clone(),
             binary_hash: meta.binary_hash.clone(),
             backend: meta.backend.clone(),
+            backend_version: result.backend_version.clone(),
+            backend_path: result.backend_path.clone(),
             status: meta.status.clone(),
             started_at: now.clone(),
             finished_at: now,
@@ -157,7 +194,14 @@ impl AnalysisBackend for ValidateOnlyBackend {
         if !request.binary_path.is_file() {
             return Err(AnalysisError::MissingBinary(request.binary_path.clone()));
         }
-        Ok(AnalysisResult { functions: vec![], call_edges: vec![], evidence: vec![] })
+        Ok(AnalysisResult {
+            functions: vec![],
+            call_edges: vec![],
+            evidence: vec![],
+            basic_blocks: vec![],
+            backend_version: None,
+            backend_path: None,
+        })
     }
 
     fn name(&self) -> &'static str {

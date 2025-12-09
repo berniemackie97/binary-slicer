@@ -66,6 +66,8 @@ fn ritual_run_record_round_trip() {
         spec_hash: "abc".into(),
         binary_hash: Some("binhash".into()),
         backend: "validate-only".into(),
+        backend_version: Some("v0".into()),
+        backend_path: Some("/tool".into()),
         status: ritual_core::db::RitualRunStatus::Stubbed,
         started_at: "now".into(),
         finished_at: "now".into(),

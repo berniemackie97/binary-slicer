@@ -13,13 +13,14 @@ serde_json = { workspace = true }
 rusqlite = { workspace = true }
 chrono = { workspace = true }
 capstone = { version = "0.11", optional = true }
+goblin = { version = "0.8", optional = true }
 
 
 [dev-dependencies]
 tempfile = { workspace = true }
 
 [features]
-default = []
-capstone-backend = ["capstone"]
+default = ["capstone-backend"]
+capstone-backend = ["capstone", "goblin"]
 rizin-backend = []
 ghidra-backend = []

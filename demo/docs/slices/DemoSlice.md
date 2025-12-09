@@ -1,6 +1,6 @@
-# Telemetry
+# DemoSlice
 
-Telemetry slice
+Demo slice for CQ2
 
 ## Roots
 - TODO: list root functions (by address/name) that define this slice.
