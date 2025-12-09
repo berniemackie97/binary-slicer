@@ -191,14 +191,9 @@ fn mach_symbols(bin: &mach::MachO, bytes_len: usize) -> Vec<SymbolInfo> {
     }
 
     // Best-effort: map to sections to recover file slices when possible.
-    let mut sections = bin.segments.sections();
     let mut mapped = Vec::new();
-    while let Some(sec_iter) = sections.next() {
-        for sec_res in sec_iter {
-            if let Ok((sec, _)) = sec_res {
-                mapped.push(sec);
-            }
-        }
+    for (sec, _) in bin.segments.sections().flatten().filter_map(Result::ok) {
+        mapped.push(sec);
     }
     for sym in symbols.iter_mut() {
         for sec in &mapped {
@@ -263,8 +258,7 @@ fn collect_sections(bytes: &[u8]) -> Vec<SectionRange> {
         Ok(Object::Elf(elf)) => elf
             .section_headers
             .iter()
-            .enumerate()
-            .map(|(_idx, sh)| SectionRange {
+            .map(|sh| SectionRange {
                 name: elf.strtab.get_at(sh.sh_name).unwrap_or("").to_string(),
                 start: sh.sh_addr,
                 end: sh.sh_addr.saturating_add(sh.sh_size),
@@ -283,23 +277,19 @@ fn collect_sections(bytes: &[u8]) -> Vec<SectionRange> {
                 size: Some(sec.size_of_raw_data as usize),
             })
             .collect(),
-        Ok(Object::Mach(mach::Mach::Binary(bin))) => {
-            let mut ranges = Vec::new();
-            let mut sections = bin.segments.sections();
-            while let Some(iter) = sections.next() {
-                for sec_res in iter.flatten() {
-                    let (sec, _) = sec_res;
-                    ranges.push(SectionRange {
-                        name: sec.name().unwrap_or("").to_string(),
-                        start: sec.addr,
-                        end: sec.addr.saturating_add(sec.size),
-                        file_offset: Some(sec.offset as usize),
-                        size: Some(sec.size as usize),
-                    });
-                }
-            }
-            ranges
-        }
+        Ok(Object::Mach(mach::Mach::Binary(bin))) => bin
+            .segments
+            .sections()
+            .flatten()
+            .filter_map(|res| res.ok())
+            .map(|(sec, _)| SectionRange {
+                name: sec.name().unwrap_or("").to_string(),
+                start: sec.addr,
+                end: sec.addr.saturating_add(sec.size),
+                file_offset: Some(sec.offset as usize),
+                size: Some(sec.size as usize),
+            })
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -399,7 +389,7 @@ fn operand_evidence(
                     });
                 }
                 capstone::arch::x86::X86OperandType::Mem(mem) => {
-                    let disp = mem.disp() as i64;
+                    let disp = mem.disp();
                     evidence.push(EvidenceRecord {
                         address,
                         description: format!(
@@ -540,7 +530,7 @@ impl AnalysisBackend for CapstoneBackend {
                         });
                         current_block_len += 1;
 
-                        if let Ok(detail) = cs.insn_detail(&i) {
+                        if let Ok(detail) = cs.insn_detail(i) {
                             let is_call = detail.groups().iter().any(|g| {
                                 *g == InsnGroupId(capstone::InsnGroupType::CS_GRP_CALL as u8)
                             });
@@ -684,7 +674,7 @@ impl AnalysisBackend for CapstoneBackend {
                         .to_string(),
                     });
                     current_block_len += 1;
-                    if let Ok(detail) = cs.insn_detail(&i) {
+                    if let Ok(detail) = cs.insn_detail(i) {
                         let is_block_term = detail.groups().iter().any(|g| {
                             *g == InsnGroupId(capstone::InsnGroupType::CS_GRP_CALL as u8)
                                 || *g == InsnGroupId(capstone::InsnGroupType::CS_GRP_JUMP as u8)
@@ -704,8 +694,7 @@ impl AnalysisBackend for CapstoneBackend {
                         }
                         if detail
                             .groups()
-                            .iter()
-                            .any(|g| *g == InsnGroupId(capstone::InsnGroupType::CS_GRP_CALL as u8))
+                            .contains(&InsnGroupId(capstone::InsnGroupType::CS_GRP_CALL as u8))
                         {
                             if let Some(target) = decode_call_target(&detail) {
                                 call_edges.push(CallEdge {

@@ -32,8 +32,7 @@ fn render_dot(result: &AnalysisResult) -> String {
         return out;
     }
     for func in &result.functions {
-        let label =
-            func.name.clone().unwrap_or_else(|| format!("0x{:X}", func.address));
+        let label = func.name.clone().unwrap_or_else(|| format!("0x{:X}", func.address));
         out.push_str(&format!("  f_{:X} [label=\"{}\" shape=box];\n", func.address, label));
     }
     for edge in &result.call_edges {

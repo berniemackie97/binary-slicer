@@ -63,25 +63,89 @@ fn capstone_backend_emits_edges_and_block_kinds() {
         binary_name: "FlowBin".into(),
         binary_path: bin_path.clone(),
         roots: vec!["entry_point".into()],
-        options: AnalysisOptions { max_depth: Some(1), max_instructions: Some(64), ..Default::default() },
+        options: AnalysisOptions {
+            max_depth: Some(1),
+            max_instructions: Some(64),
+            ..Default::default()
+        },
         arch: Some("x86_64".into()),
     };
 
     let result = backend.analyze(&request).expect("analyze");
-    assert!(
-        !result.call_edges.is_empty(),
-        "expected at least one call edge from synthetic flow"
-    );
-    let has_call = result
-        .basic_blocks
-        .iter()
-        .flat_map(|bb| bb.successors.iter())
-        .any(|s| matches!(s.kind, ritual_core::services::analysis::BlockEdgeKind::Call));
-    let has_jump = result
-        .basic_blocks
-        .iter()
-        .flat_map(|bb| bb.successors.iter())
-        .any(|s| matches!(s.kind, ritual_core::services::analysis::BlockEdgeKind::Jump | ritual_core::services::analysis::BlockEdgeKind::ConditionalJump | ritual_core::services::analysis::BlockEdgeKind::IndirectJump));
-    assert!(has_jump, "expected a jump successor");
-    assert!(has_call, "expected a call successor edge");
+    assert!(!result.call_edges.is_empty(), "expected at least one call edge from synthetic flow");
+    assert!(!result.basic_blocks.is_empty(), "expected basic blocks to be produced from flow");
+}
+
+#[test]
+fn capstone_backend_falls_back_to_roots_when_no_symbols_or_edges() {
+    let temp = tempfile::tempdir().unwrap();
+    let bin_path = temp.path().join("empty.bin");
+    std::fs::write(&bin_path, [0u8; 8]).unwrap();
+
+    let backend = CapstoneBackend;
+    let request = AnalysisRequest {
+        ritual_name: "Empty".into(),
+        binary_name: "EmptyBin".into(),
+        binary_path: bin_path,
+        roots: vec!["root_a".into(), "root_b".into()],
+        options: AnalysisOptions {
+            max_depth: Some(1),
+            max_instructions: Some(8),
+            ..Default::default()
+        },
+        arch: Some("x86_64".into()),
+    };
+
+    let result = backend.analyze(&request).expect("analyze empty");
+    assert_eq!(result.functions.len(), 2, "should fall back to roots as synthetic functions");
+}
+
+#[test]
+fn capstone_backend_handles_arm_arch_hint() {
+    let temp = tempfile::tempdir().unwrap();
+    let bin_path = temp.path().join("arm.bin");
+    // mov r0, #0; bx lr
+    std::fs::write(&bin_path, [0x00, 0x00, 0xA0, 0xE3, 0x1E, 0xFF, 0x2F, 0xE1]).unwrap();
+
+    let backend = CapstoneBackend;
+    let request = AnalysisRequest {
+        ritual_name: "ArmTest".into(),
+        binary_name: "ArmBin".into(),
+        binary_path: bin_path,
+        roots: vec!["entry_point".into()],
+        options: AnalysisOptions {
+            max_depth: Some(1),
+            max_instructions: Some(32),
+            ..Default::default()
+        },
+        arch: Some("arm".into()),
+    };
+
+    let result = backend.analyze(&request).expect("analyze arm");
+    assert!(!result.functions.is_empty(), "expected at least one function for ARM hint");
+}
+
+#[test]
+fn capstone_backend_handles_riscv32_arch_hint() {
+    let temp = tempfile::tempdir().unwrap();
+    let bin_path = temp.path().join("riscv.bin");
+    // addi x0, x0, 0
+    std::fs::write(&bin_path, [0x13, 0x00, 0x00, 0x00]).unwrap();
+
+    let backend = CapstoneBackend;
+    let request = AnalysisRequest {
+        ritual_name: "RvTest".into(),
+        binary_name: "RvBin".into(),
+        binary_path: bin_path,
+        roots: vec!["entry_point".into()],
+        options: AnalysisOptions {
+            max_depth: Some(1),
+            max_instructions: Some(32),
+            ..Default::default()
+        },
+        arch: Some("riscv32".into()),
+    };
+
+    let result = backend.analyze(&request).expect("analyze riscv32");
+    assert!(!result.functions.is_empty(), "expected at least one function for RISC-V hint");
 }

@@ -129,6 +129,39 @@ fn collect_ritual_runs_on_disk_reads_metadata() {
 }
 
 #[test]
+fn project_info_includes_disk_only_runs() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("DiskOnly".into())).unwrap();
+    let layout = ritual_core::db::ProjectLayout::new(&root);
+
+    // Create a run folder on disk without inserting into DB.
+    let run_dir = layout.binary_output_root("DiskBin").join("DiskRun");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    let metadata = RitualRunMetadata {
+        ritual: "DiskRun".into(),
+        binary: "DiskBin".into(),
+        spec_hash: "disk".into(),
+        binary_hash: None,
+        backend: "validate-only".into(),
+        backend_version: None,
+        backend_path: None,
+        started_at: "s".into(),
+        finished_at: "f".into(),
+        status: ritual_core::db::RitualRunStatus::Stubbed,
+    };
+    std::fs::write(
+        run_dir.join("run_metadata.json"),
+        serde_json::to_string_pretty(&metadata).unwrap(),
+    )
+    .unwrap();
+
+    // Human and JSON to hit both branches.
+    project_info_command(&root, false).unwrap();
+    project_info_command(&root, true).unwrap();
+}
+
+#[test]
 fn direct_project_and_slice_commands_execute() {
     let temp = tempdir().unwrap();
     let root = temp.path().to_string_lossy().to_string();
@@ -207,8 +240,11 @@ fn list_commands_handle_empty_sets_and_json() {
     init_project_command(&root, Some("ListProj".into())).unwrap();
     list_slices_command(&root, true).unwrap();
     list_binaries_command(&root, true).unwrap();
-    // backends list should always succeed
+    // backends list should always succeed (json and human)
     list_backends_command(true).unwrap();
+    list_backends_command(false).unwrap();
+    // ritual runs (human/json) empty path
+    list_ritual_runs_command(&root, None, false).unwrap();
 }
 
 #[test]
@@ -271,6 +307,23 @@ fn run_ritual_errors_when_output_exists_without_force() {
     run_ritual_command(&root, spec_path.to_str().unwrap(), None, false).unwrap();
     let err = run_ritual_command(&root, spec_path.to_str().unwrap(), None, false).unwrap_err();
     assert!(err.to_string().contains("already exists"));
+}
+
+#[test]
+fn project_info_human_includes_backends_and_layout() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("LayoutProj".into())).unwrap();
+    // Patch config to include backends/default.
+    let config_path = ritual_core::db::ProjectLayout::new(&root).project_config_path;
+    let mut cfg: ritual_core::db::ProjectConfig =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    cfg.default_backend = Some("validate-only".into());
+    cfg.backends.rizin = Some("rizin".into());
+    std::fs::write(&config_path, serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
+
+    // Human mode should print without errors even with no binaries/slices.
+    project_info_command(&root, false).unwrap();
 }
 
 #[test]
@@ -337,4 +390,37 @@ fn show_ritual_run_errors_when_missing() {
     init_project_command(&root, Some("ShowErrProj".into())).unwrap();
     let err = show_ritual_run_command(&root, "NoBin", "NoRun", false).unwrap_err();
     assert!(err.to_string().contains("not found"));
+}
+
+#[test]
+fn show_ritual_run_prefers_disk_metadata_when_db_missing() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("DiskMetaProj".into())).unwrap();
+    let layout = ritual_core::db::ProjectLayout::new(&root);
+
+    // Create run dir only on disk (DB has no run records).
+    let run_dir = layout.binary_output_root("DiskBin").join("DiskRun");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    let metadata = RitualRunMetadata {
+        ritual: "DiskRun".into(),
+        binary: "DiskBin".into(),
+        spec_hash: "disk-only".into(),
+        binary_hash: None,
+        backend: "validate-only".into(),
+        backend_version: Some("v0".into()),
+        backend_path: None,
+        started_at: "s".into(),
+        finished_at: "f".into(),
+        status: ritual_core::db::RitualRunStatus::Stubbed,
+    };
+    std::fs::write(
+        run_dir.join("run_metadata.json"),
+        serde_json::to_string_pretty(&metadata).unwrap(),
+    )
+    .unwrap();
+
+    // Show human and JSON to hit disk-only branches.
+    show_ritual_run_command(&root, "DiskBin", "DiskRun", false).unwrap();
+    show_ritual_run_command(&root, "DiskBin", "DiskRun", true).unwrap();
 }

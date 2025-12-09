@@ -4,5 +4,9 @@
   "config_version": "0.1.0",
   "db": {
     "path": ".ritual\\project.db"
+  },
+  "default_backend": "ghidra",
+  "backends": {
+    "ghidra_headless": "C:\\Users\\berni\\Downloads\\ghidra_12.0_PUBLIC_20251205\\ghidra_12.0_PUBLIC\\support\\analyzeHeadless.bat"
   }
 }

@@ -2,7 +2,6 @@ name: DemoRun
 binary: CQ2
 backend: capstone
 roots:
-  # From IDA notes; targets a CAutoHangUpMgr routine and memory info exports.
   - 0x49BF04
   - 0x6CC
   - 0x6DC
