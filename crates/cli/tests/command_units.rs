@@ -424,3 +424,50 @@ fn show_ritual_run_prefers_disk_metadata_when_db_missing() {
     show_ritual_run_command(&root, "DiskBin", "DiskRun", false).unwrap();
     show_ritual_run_command(&root, "DiskBin", "DiskRun", true).unwrap();
 }
+
+#[test]
+fn list_ritual_runs_filters_disk_runs_only() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("DiskRunsOnly".into())).unwrap();
+    let layout = ritual_core::db::ProjectLayout::new(&root);
+
+    let run_root = layout.binary_output_root("FilterBin").join("FilterRun");
+    std::fs::create_dir_all(&run_root).unwrap();
+    let metadata = RitualRunMetadata {
+        ritual: "FilterRun".into(),
+        binary: "FilterBin".into(),
+        spec_hash: "disk-only".into(),
+        binary_hash: None,
+        backend: "validate-only".into(),
+        backend_version: Some("v0".into()),
+        backend_path: None,
+        started_at: "s".into(),
+        finished_at: "f".into(),
+        status: ritual_core::db::RitualRunStatus::Stubbed,
+    };
+    std::fs::write(
+        run_root.join("run_metadata.json"),
+        serde_json::to_string_pretty(&metadata).unwrap(),
+    )
+    .unwrap();
+    list_ritual_runs_command(&root, Some("FilterBin"), false).unwrap();
+    list_ritual_runs_command(&root, Some("FilterBin"), true).unwrap();
+}
+
+#[test]
+fn list_and_emit_slices_with_descriptions() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().to_string_lossy().to_string();
+    init_project_command(&root, Some("SlicesProj".into())).unwrap();
+    init_slice_command(&root, "Gameplay", Some("Core gameplay loop".into())).unwrap();
+
+    // Human listing should include description and status.
+    list_slices_command(&root, false).unwrap();
+    // JSON listing should also succeed.
+    list_slices_command(&root, true).unwrap();
+
+    // Emit docs and reports when slices are present (non-empty branches).
+    emit_slice_docs_command(&root).unwrap();
+    emit_slice_reports_command(&root).unwrap();
+}

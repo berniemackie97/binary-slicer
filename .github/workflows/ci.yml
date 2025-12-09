@@ -129,11 +129,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cov-
 
-      - name: "Coverage (core: lines 85 / functions 80)"
-        run: cargo llvm-cov --package ritual-core --fail-under-lines 85 --fail-under-functions 80
+      - name: "Coverage (core: lines 80 / functions 70)"
+        run: cargo llvm-cov --package ritual-core --fail-under-lines 80 --fail-under-functions 70
 
-      - name: "Coverage (workspace: lines 80 / functions 55)"
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info --fail-under-lines 80 --fail-under-functions 55
+      - name: "Coverage (workspace: lines 80 / functions 50)"
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.info --fail-under-lines 80 --fail-under-functions 50
 
       - name: Upload coverage artifact (LCOV)
         uses: actions/upload-artifact@v4

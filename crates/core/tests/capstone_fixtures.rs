@@ -1,15 +1,13 @@
 #![cfg(feature = "capstone-backend")]
 
-use std::path::PathBuf;
-#[cfg(target_os = "windows")]
-use std::process::Command;
-
-use object::write::{Object, Symbol, SymbolSection};
+use goblin::Object;
+use object::write::{Object as ObjectWriter, Symbol, SymbolSection};
 use object::{
     Architecture, BinaryFormat, Endianness, SectionKind, SymbolFlags, SymbolKind, SymbolScope,
 };
 use ritual_core::services::analysis::{AnalysisBackend, AnalysisOptions, AnalysisRequest};
 use ritual_core::services::backends::CapstoneBackend;
+use std::path::PathBuf;
 
 fn capstone_request(binary_path: PathBuf, roots: Vec<String>) -> AnalysisRequest {
     AnalysisRequest {
@@ -40,7 +38,7 @@ fn build_pe_fixture() -> PathBuf {
     )
     .unwrap();
     let out = temp.path().join("fixture.dll");
-    let status = Command::new("rustc")
+    let status = std::process::Command::new("rustc")
         .args(["--crate-type=cdylib", src.to_str().unwrap(), "-o"])
         .arg(&out)
         .status()
@@ -66,7 +64,7 @@ fn capstone_handles_pe_with_exports() {
 #[test]
 fn capstone_handles_minimal_elf_with_symbols_and_evidence() {
     let temp = tempfile::tempdir().unwrap();
-    let mut obj = Object::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
+    let mut obj = ObjectWriter::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
 
     // .text with one instruction stream.
     let text_id = obj.add_section(Vec::new(), b".text".to_vec(), SectionKind::Text);
@@ -75,9 +73,18 @@ fn capstone_handles_minimal_elf_with_symbols_and_evidence() {
     let ro_id = obj.add_section(Vec::new(), b".rodata".to_vec(), SectionKind::ReadOnlyData);
     obj.section_mut(ro_id).append_data(b"hello\x00", 1);
 
-    // mov rax, imm64 (0x0) to trigger operand evidence against .rodata start.
-    obj.section_mut(text_id)
-        .set_data(Vec::from_iter([0x48u8, 0xB8].into_iter().chain(0u64.to_le_bytes())), 1);
+    // Instructions:
+    //  mov rax, imm64 (patched to .rodata start)
+    //  mov rbx, rax (reg operand evidence)
+    //  mov rax, [rbx+0x10] (mem operand evidence)
+    //  ret
+    let mut text = Vec::new();
+    text.extend([0x48u8, 0xB8]); // mov rax, imm64
+    text.extend(0u64.to_le_bytes());
+    text.extend([0x48, 0x89, 0xC3]); // mov rbx, rax
+    text.extend([0x48, 0x8B, 0x43, 0x10]); // mov rax, [rbx+0x10]
+    text.push(0xC3); // ret
+    obj.section_mut(text_id).set_data(text, 1);
 
     // Symbol for the function.
     obj.add_symbol(Symbol {
@@ -91,8 +98,47 @@ fn capstone_handles_minimal_elf_with_symbols_and_evidence() {
         flags: SymbolFlags::Elf { st_info: 0x12, st_other: 0 },
     });
 
+    let mut bytes = obj.write().unwrap();
+    let (ro_start, text_offset) = match Object::parse(&bytes).expect("parse object for operands") {
+        Object::Elf(elf) => {
+            let names: Vec<_> =
+                elf.section_headers.iter().filter_map(|sh| elf.strtab.get_at(sh.sh_name)).collect();
+            let ro = elf.section_headers.iter().find(|sh| {
+                let name = elf.strtab.get_at(sh.sh_name).unwrap_or("");
+                name == ".rodata"
+                    || (sh.sh_size > 0
+                        && sh.sh_flags & u64::from(goblin::elf::section_header::SHF_EXECINSTR) == 0
+                        && name.contains("rodata"))
+            });
+            let ro = ro
+                .or_else(|| {
+                    elf.section_headers.iter().find(|sh| {
+                        sh.sh_size > 0
+                            && sh.sh_flags & u64::from(goblin::elf::section_header::SHF_EXECINSTR)
+                                == 0
+                    })
+                })
+                .unwrap_or_else(|| panic!("rodata header; saw sections {names:?}"));
+            let text = elf.section_headers.iter().find(|sh| {
+                elf.strtab.get_at(sh.sh_name) == Some(".text")
+                    || sh.sh_flags & u64::from(goblin::elf::section_header::SHF_EXECINSTR) != 0
+            });
+            let text = text
+                .or_else(|| {
+                    elf.section_headers.iter().find(|sh| {
+                        sh.sh_flags & u64::from(goblin::elf::section_header::SHF_EXECINSTR) != 0
+                    })
+                })
+                .unwrap_or_else(|| panic!("text header; saw sections {names:?}"));
+            (ro.sh_addr, text.sh_offset as usize)
+        }
+        other => panic!("unexpected object {:?}", other),
+    };
+    let imm_offset = text_offset + 2; // after opcode
+    bytes[imm_offset..imm_offset + 8].copy_from_slice(&ro_start.to_le_bytes());
+
     let bin_path = temp.path().join("fixture_elf");
-    std::fs::write(&bin_path, obj.write().unwrap()).unwrap();
+    std::fs::write(&bin_path, bytes).unwrap();
 
     let backend = CapstoneBackend;
     let request = capstone_request(bin_path, vec!["hello_fn".into()]);
@@ -108,7 +154,7 @@ fn capstone_handles_minimal_elf_with_symbols_and_evidence() {
 #[test]
 fn capstone_handles_minimal_macho_with_symbol() {
     let temp = tempfile::tempdir().unwrap();
-    let mut obj = Object::new(BinaryFormat::MachO, Architecture::X86_64, Endianness::Little);
+    let mut obj = ObjectWriter::new(BinaryFormat::MachO, Architecture::X86_64, Endianness::Little);
 
     // .text with ret
     let text_id = obj.add_section(Vec::new(), b"__TEXT,__text".to_vec(), SectionKind::Text);
@@ -136,6 +182,66 @@ fn capstone_handles_minimal_macho_with_symbol() {
         "expected Mach-O symbol-derived function"
     );
     assert!(!result.basic_blocks.is_empty(), "expected basic blocks from Mach-O fixture");
+}
+
+#[test]
+fn capstone_auto_detects_pe_arch_and_symbols() {
+    // Windows-only fixture builder; skip elsewhere.
+    #[cfg(not(target_os = "windows"))]
+    {
+        eprintln!("skipping PE auto-detect on non-Windows");
+        return;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let bin_path = build_pe_fixture();
+        let backend = CapstoneBackend;
+        let request = AnalysisRequest {
+            ritual_name: "AutoPE".into(),
+            binary_name: "AutoPEBin".into(),
+            binary_path: bin_path,
+            roots: vec!["add".into()],
+            options: AnalysisOptions {
+                max_depth: Some(1),
+                max_instructions: Some(64),
+                ..Default::default()
+            },
+            arch: None, // force PE arch detection
+        };
+        let result = backend.analyze(&request).expect("analyze pe auto");
+        assert!(
+            result.functions.iter().any(|f| f.name.as_deref() == Some("add")),
+            "expected exported symbol detected from PE"
+        );
+    }
+}
+
+#[test]
+fn capstone_auto_detects_macho_arch() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut obj = ObjectWriter::new(BinaryFormat::MachO, Architecture::X86_64, Endianness::Little);
+    let text_id = obj.add_section(Vec::new(), b"__TEXT,__text".to_vec(), SectionKind::Text);
+    obj.section_mut(text_id).append_data(&[0xC3], 1);
+    obj.add_symbol(Symbol {
+        name: b"_auto_mach".to_vec(),
+        value: 0,
+        size: 0,
+        kind: SymbolKind::Text,
+        scope: SymbolScope::Linkage,
+        weak: false,
+        section: SymbolSection::Section(text_id),
+        flags: SymbolFlags::MachO { n_desc: 0 },
+    });
+    let bin_path = temp.path().join("auto_mach");
+    std::fs::write(&bin_path, obj.write().unwrap()).unwrap();
+
+    let backend = CapstoneBackend;
+    let request = capstone_request(bin_path, vec!["_auto_mach".into()]);
+    let result = backend.analyze(&request).expect("analyze macho auto");
+    assert!(
+        result.functions.iter().any(|f| f.name.as_deref() == Some("_auto_mach")),
+        "expected Mach-O symbol via auto-detect"
+    );
 }
 
 #[cfg(target_os = "macos")]
