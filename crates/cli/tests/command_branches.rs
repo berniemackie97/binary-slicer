@@ -23,7 +23,7 @@ fn project_info_reports_binaries_and_slices() {
         false,
     )
     .unwrap();
-    init_slice_command(&root, "SliceA", Some("Test slice".into())).unwrap();
+    init_slice_command(&root, "SliceA", Some("Test slice".into()), None).unwrap();
 
     // Human mode should print without errors.
     project_info_command(&root, false).unwrap();

@@ -14,7 +14,7 @@ fn project_db_initializes_and_handles_binaries_and_slices() {
         // Check that user_version is set to latest.
         let version: i32 =
             conn.query_row("PRAGMA user_version;", [], |row| row.get(0)).expect("schema version");
-        assert_eq!(version, 4);
+        assert_eq!(version, ritual_core::db::project_db::CURRENT_SCHEMA_VERSION);
 
         // Insert a binary.
         let bin = BinaryRecord::new("libExampleGame.so", "binaries/libExampleGame.so");
@@ -44,7 +44,7 @@ fn project_db_initializes_and_handles_binaries_and_slices() {
 
         let version: i32 =
             conn.query_row("PRAGMA user_version;", [], |row| row.get(0)).expect("schema version");
-        assert_eq!(version, 4);
+        assert_eq!(version, ritual_core::db::project_db::CURRENT_SCHEMA_VERSION);
 
         let binaries = db.list_binaries().expect("list binaries");
         assert_eq!(binaries.len(), 1);

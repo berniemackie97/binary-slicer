@@ -70,18 +70,26 @@ pub struct SliceRecord {
     pub name: String,
     /// Optional human-written description of this slice's purpose.
     pub description: Option<String>,
+    /// Optional default binary this slice is associated with.
+    pub default_binary: Option<String>,
     /// Lifecycle status.
     pub status: SliceStatus,
 }
 
 impl SliceRecord {
     pub fn new(name: impl Into<String>, status: SliceStatus) -> Self {
-        Self { name: name.into(), description: None, status }
+        Self { name: name.into(), description: None, default_binary: None, status }
     }
 
     /// Builder-style helper to attach a description when constructing a record.
     pub fn with_description(mut self, description: Option<String>) -> Self {
         self.description = description;
+        self
+    }
+
+    /// Builder-style helper to attach a default binary when constructing a record.
+    pub fn with_default_binary(mut self, default_binary: Option<String>) -> Self {
+        self.default_binary = default_binary;
         self
     }
 }

@@ -92,7 +92,7 @@ fn existing_schema_is_migrated_to_latest() {
     let db = ProjectDb::open(&db_path).expect("open and migrate");
     let version: i32 =
         db.connection().query_row("PRAGMA user_version;", [], |row| row.get(0)).unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, ritual_core::db::project_db::CURRENT_SCHEMA_VERSION);
 
     // Table should accept inserts post-migration.
     let run = RitualRunRecord {

@@ -115,6 +115,43 @@ pub struct RitualRunInfo {
     pub spec_hash: Option<String>,
     pub backend: Option<String>,
     pub backend_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<AnalysisSummary>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct AnalysisSummary {
+    pub functions: usize,
+    pub call_edges: usize,
+    pub basic_blocks: usize,
+    pub evidence: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend_path: Option<String>,
+}
+
+pub fn analysis_summary(
+    result: &ritual_core::services::analysis::AnalysisResult,
+    run: Option<&ritual_core::db::RitualRunRecord>,
+) -> AnalysisSummary {
+    AnalysisSummary {
+        functions: result.functions.len(),
+        call_edges: result.call_edges.len(),
+        basic_blocks: result.basic_blocks.len(),
+        evidence: result.evidence.len(),
+        backend: run.map(|r| r.backend.clone()),
+        backend_version: result
+            .backend_version
+            .clone()
+            .or_else(|| run.and_then(|r| r.backend_version.clone())),
+        backend_path: result
+            .backend_path
+            .clone()
+            .or_else(|| run.and_then(|r| r.backend_path.clone())),
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -160,6 +197,7 @@ pub fn db_run_to_info(
         spec_hash: Some(rec.spec_hash.clone()),
         backend: Some(rec.backend.clone()),
         backend_version: rec.backend_version.clone(),
+        analysis: None,
     }
 }
 
@@ -592,6 +630,10 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
     // Load DB metadata if present.
     let db_runs = load_runs_from_db(&layout, Some(binary)).unwrap_or_default();
     let db_run = db_runs.into_iter().find(|r| r.ritual == ritual);
+    let db_analysis = open_project_db(&layout)
+        .ok()
+        .and_then(|(_cfg, _db_path, db)| db.load_analysis_result(binary, ritual).ok())
+        .flatten();
 
     // Fallback to on-disk metadata if DB is missing the run.
     let spec_path = run_root.join("spec.yaml");
@@ -629,7 +671,8 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
                     "status": run.status.as_str(),
                     "started_at": run.started_at,
                     "finished_at": run.finished_at,
-                }
+                },
+                "analysis": db_analysis,
             })
         } else {
             serde_json::json!({
@@ -639,6 +682,7 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
                 "spec": spec_path.display().to_string(),
                 "report": report_path.display().to_string(),
                 "metadata": disk_metadata,
+                "analysis": db_analysis,
             })
         };
         println!("{}", serde_json::to_string_pretty(&payload)?);
@@ -679,6 +723,13 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
             println!("  Finished: {}", meta.finished_at);
         }
         _ => println!("  (No run metadata found in DB or disk)"),
+    }
+    if let Some(analysis) = db_analysis {
+        println!("  Analysis:");
+        println!("    Functions: {}", analysis.functions.len());
+        println!("    Call edges: {}", analysis.call_edges.len());
+        println!("    Basic blocks: {}", analysis.basic_blocks.len());
+        println!("    Evidence: {}", analysis.evidence.len());
     }
 
     Ok(())

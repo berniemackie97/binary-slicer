@@ -179,7 +179,11 @@ impl<'a> RitualRunner<'a> {
             started_at: now.clone(),
             finished_at: now,
         };
-        self.ctx.db.insert_ritual_run(&run_record).ok();
+        let run_id = self.ctx.db.insert_ritual_run(&run_record).ok();
+        if let Some(id) = run_id {
+            // Best-effort persistence of analysis details; ignore errors to avoid failing the run.
+            let _ = self.ctx.db.insert_analysis_result(id, &result);
+        }
 
         Ok(result)
     }

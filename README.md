@@ -14,7 +14,7 @@ Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of na
   - `init-project` creates `.ritual`, docs/reports/graphs dirs, config, and DB.
   - `list-backends` shows available analysis backends (defaults to `validate-only`; enable optional Capstone/rizin/Ghidra backends via Cargo features).
   - `add-binary` registers binaries with arch + SHA-256 (or user-provided) hash.
-  - `init-slice` inserts slice records and scaffolds docs under `docs/slices/<Name>.md`.
+  - `init-slice` inserts slice records and scaffolds docs under `docs/slices/<Name>.md` (optionally link the slice to a default binary via `--binary` so later reports/graphs pull the right analysis run).
   - `emit-slice-docs` / `emit-slice-reports` regenerate docs and JSON reports from the DB.
   - `list-slices` / `list-binaries` show stored metadata (human or JSON).
 - `project-info` reports core paths and directory health (human or JSON).
@@ -52,7 +52,7 @@ binary-slicer add-binary --root /path/to/workdir --path /path/to/libExampleGame.
 # or: --skip-hash             to avoid hashing large files
 
 # 3) Create a slice scaffold
-binary-slicer init-slice --root /path/to/workdir --name AutoUpdateManager --description "Handles OTA updates"
+binary-slicer init-slice --root /path/to/workdir --name AutoUpdateManager --description "Handles OTA updates" --binary libExampleGame.so
 
 # 4) List what you have
 binary-slicer list-slices --root /path/to/workdir
@@ -126,7 +126,7 @@ Slice docs live at `docs/slices/<Name>.md` and are meant to be edited by humans 
 ### Backend features
 
 - `capstone-backend`: enables a Capstone-based backend (symbol-aware disassembly with basic blocks + call-edge extraction; ELF/PE/Mach-O section mapping) and makes it available via `--backend capstone`.
-- `rizin-backend`: registers a rizin-backed analyzer that validates the binary and captures `rizin -v` as evidence; ensure `rizin` is installed and on PATH.
+- `rizin-backend`: rizin-backed analyzer (prefers `RIZIN_BIN` env, otherwise `rizin`) that shells out headless to discover functions/metadata. In CI or offline tests you can set `BS_RIZIN_FAKE_JSON` / `BS_RIZIN_FAKE_GRAPH` / `BS_RIZIN_FAKE_STRINGS` and `BS_RIZIN_FAKE_VERSION` to avoid needing rizin installed.
 - `ghidra-backend`: registers a Ghidra headless stub (requires `GHIDRA_ANALYZE_HEADLESS` pointing to `analyzeHeadless` or `GHIDRA_INSTALL_DIR`); Ghidra version is recorded as evidence.
 - `setup-backend` can record tool paths in `.ritual/project.json` (and set `default_backend`), and optionally append the tool directory to your shell profile PATH (`--write-path`). It never installs software silently.
 
@@ -203,4 +203,3 @@ cargo llvm-cov --workspace --lcov --output-path lcov.info
 - Evidence index tying doc claims to addresses/xrefs/strings.
 - Cross-build diffing for binaries/slices/functions.
 - Optional Python bindings for ad-hoc analysis.
-

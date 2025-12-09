@@ -3,6 +3,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
+use crate::commands::rituals::analysis_summary;
 use crate::commands::{RitualRunInfo, RitualRunMetadata, RitualSpecInfo};
 
 /// Load the project config JSON from disk (delegates to core helper).
@@ -98,6 +99,7 @@ pub fn collect_ritual_runs_on_disk(
                 spec_hash,
                 backend,
                 backend_version,
+                analysis: None,
             });
         }
     }
@@ -166,10 +168,16 @@ pub fn load_runs_from_db_and_disk(
     layout: &ritual_core::db::ProjectLayout,
     binary_filter: Option<&str>,
 ) -> Result<Vec<RitualRunInfo>> {
-    let mut runs: Vec<RitualRunInfo> = load_runs_from_db(layout, binary_filter)?
-        .iter()
-        .map(|r| crate::commands::db_run_to_info(layout, r))
-        .collect();
+    let (_config, _db_path, db) = open_project_db(layout)?;
+    let mut runs: Vec<RitualRunInfo> = Vec::new();
+    let db_runs = db.list_ritual_runs(binary_filter).unwrap_or_default();
+    for run in &db_runs {
+        let mut info = crate::commands::db_run_to_info(layout, run);
+        if let Ok(Some(analysis)) = db.load_analysis_result(&run.binary, &run.ritual) {
+            info.analysis = Some(analysis_summary(&analysis, Some(run)));
+        }
+        runs.push(info);
+    }
 
     // Merge in on-disk runs not in DB.
     let disk_runs = collect_ritual_runs_on_disk(layout, binary_filter)?;

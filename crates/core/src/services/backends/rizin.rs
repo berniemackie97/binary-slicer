@@ -1,11 +1,15 @@
+use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
+
+use serde::Deserialize;
 
 use crate::services::analysis::{
     AnalysisBackend, AnalysisError, AnalysisRequest, AnalysisResult, CallEdge, EvidenceRecord,
     FunctionRecord,
 };
 
-/// Minimal rizin-backed analyzer that validates the binary and captures `rizin -v`.
+/// Rizin-backed analyzer that shells out to rizin/rz with a minimal script to gather symbols.
 pub struct RizinBackend;
 
 impl AnalysisBackend for RizinBackend {
@@ -14,31 +18,53 @@ impl AnalysisBackend for RizinBackend {
             return Err(AnalysisError::MissingBinary(request.binary_path.clone()));
         }
 
-        // Capture rizin version as evidence; if rizin is missing, surface a backend error.
-        let version = version_string().map_err(AnalysisError::Backend)?;
+        let rizin_path = resolve_rizin_path();
+        let version = version_string(&rizin_path).map_err(AnalysisError::Backend)?;
 
-        let functions: Vec<FunctionRecord> = request
-            .roots
-            .iter()
-            .enumerate()
-            .map(|(idx, name)| FunctionRecord {
-                address: 0x2000 + idx as u64,
-                name: Some(name.clone()),
-                size: None,
-                in_slice: true,
-                is_boundary: false,
-            })
-            .collect();
+        // Allow tests to feed synthetic JSON via env to avoid needing rizin installed.
+        let (functions, call_edges) =
+            if let Some(fake_json) = std::env::var_os("BS_RIZIN_FAKE_JSON") {
+                let body = fs::read_to_string(fake_json).map_err(|e| {
+                    AnalysisError::Backend(format!("failed to read BS_RIZIN_FAKE_JSON: {e}"))
+                })?;
+                let parsed = parse_functions(&body)?;
+                (parsed.0, parsed.1)
+            } else {
+                let json = run_rizin_json(&rizin_path, &request.binary_path, "aa;aflj")?;
+                let parsed = parse_functions(&json)?;
+                (parsed.0, parsed.1)
+            };
 
-        let evidence = vec![EvidenceRecord { address: 0, description: version.clone() }];
+        let basic_blocks = if let Some(fake_graph) = std::env::var_os("BS_RIZIN_FAKE_GRAPH") {
+            let body = fs::read_to_string(fake_graph).map_err(|e| {
+                AnalysisError::Backend(format!("failed to read BS_RIZIN_FAKE_GRAPH: {e}"))
+            })?;
+            parse_basic_blocks(&body)?
+        } else {
+            let json = run_rizin_json(&rizin_path, &request.binary_path, "aa;agfj")?;
+            parse_basic_blocks(&json)?
+        };
+
+        let mut evidence = vec![EvidenceRecord { address: 0, description: version.clone() }];
+        // Strings as evidence.
+        let strings_json = std::env::var_os("BS_RIZIN_FAKE_STRINGS")
+            .map(|p| fs::read_to_string(&p).map_err(|e| e.to_string()))
+            .transpose()
+            .map_err(AnalysisError::Backend)?
+            .unwrap_or_else(|| {
+                run_rizin_json(&rizin_path, &request.binary_path, "izj").unwrap_or_default()
+            });
+        if !strings_json.is_empty() {
+            evidence.extend(parse_strings(&strings_json)?);
+        }
 
         Ok(AnalysisResult {
             functions,
-            call_edges: vec![CallEdge { from: 0, to: 0, is_cross_slice: false }],
+            call_edges,
             evidence,
-            basic_blocks: vec![],
+            basic_blocks,
             backend_version: Some(version),
-            backend_path: None,
+            backend_path: Some(rizin_path.display().to_string()),
         })
     }
 
@@ -47,8 +73,62 @@ impl AnalysisBackend for RizinBackend {
     }
 }
 
-fn version_string() -> Result<String, String> {
-    let output = Command::new("rizin")
+fn resolve_rizin_path() -> PathBuf {
+    std::env::var_os("RIZIN_BIN").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("rizin"))
+}
+
+fn run_rizin_json(
+    rizin_bin: &PathBuf,
+    binary: &PathBuf,
+    command: &str,
+) -> Result<String, AnalysisError> {
+    let output = Command::new(rizin_bin)
+        .args(["-2", "-q0", "-c", command])
+        .arg(binary)
+        .output()
+        .map_err(|e| AnalysisError::Backend(format!("failed to spawn rizin: {e}")))?;
+    if !output.status.success() {
+        return Err(AnalysisError::Backend(format!("rizin exited with {}", output.status)));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    Ok(stdout)
+}
+
+fn parse_functions(body: &str) -> Result<(Vec<FunctionRecord>, Vec<CallEdge>), AnalysisError> {
+    // rizin aflj returns a JSON array; tolerate empty/invalid gracefully.
+    let funcs: Vec<RizinFunction> = serde_json::from_str(body)
+        .map_err(|e| AnalysisError::Backend(format!("failed to parse rizin JSON: {e}")))?;
+    let mut out_funcs = Vec::new();
+    let mut edges = Vec::new();
+    for f in funcs {
+        let from = f.offset.unwrap_or(0);
+        out_funcs.push(FunctionRecord {
+            address: from,
+            name: f.name.clone(),
+            size: f.size.map(|s| s as u32),
+            in_slice: true,
+            is_boundary: false,
+        });
+        if let Some(callrefs) = f.callrefs {
+            for cref in callrefs {
+                if cref.typ.as_deref() == Some("C") || cref.typ.as_deref() == Some("call") {
+                    edges.push(CallEdge {
+                        from,
+                        to: cref.addr.unwrap_or(0),
+                        is_cross_slice: false,
+                    });
+                }
+            }
+        }
+    }
+    Ok((out_funcs, edges))
+}
+
+fn version_string(rizin_bin: &PathBuf) -> Result<String, String> {
+    if let Some(fake) = std::env::var_os("BS_RIZIN_FAKE_VERSION") {
+        return Ok(fake.to_string_lossy().to_string());
+    }
+    let output = Command::new(rizin_bin)
         .arg("-v")
         .output()
         .map_err(|e| format!("failed to spawn rizin: {e}"))?;
@@ -61,4 +141,101 @@ fn version_string() -> Result<String, String> {
     } else {
         Ok(stdout)
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct RizinFunction {
+    #[serde(default)]
+    offset: Option<u64>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    size: Option<u64>,
+    #[serde(default)]
+    callrefs: Option<Vec<RizinCallRef>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RizinCallRef {
+    #[serde(default)]
+    addr: Option<u64>,
+    #[serde(default)]
+    #[serde(rename = "type")]
+    typ: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RizinGraphFunction {
+    #[serde(default)]
+    offset: Option<u64>,
+    #[serde(default)]
+    blocks: Option<Vec<RizinBlock>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RizinBlock {
+    #[serde(default)]
+    offset: Option<u64>,
+    #[serde(default)]
+    size: Option<u64>,
+    #[serde(default)]
+    jump: Option<u64>,
+    #[serde(default)]
+    fail: Option<u64>,
+}
+
+fn parse_basic_blocks(
+    body: &str,
+) -> Result<Vec<crate::services::analysis::BasicBlock>, AnalysisError> {
+    let funcs: Vec<RizinGraphFunction> = serde_json::from_str(body)
+        .map_err(|e| AnalysisError::Backend(format!("failed to parse rizin agfj JSON: {e}")))?;
+    let mut blocks_out = Vec::new();
+    for func in funcs {
+        if let Some(blocks) = func.blocks {
+            for b in blocks {
+                let start = b.offset.unwrap_or(0);
+                let mut successors = Vec::new();
+                if let Some(j) = b.jump {
+                    successors.push(crate::services::analysis::BlockEdge {
+                        target: j,
+                        kind: crate::services::analysis::BlockEdgeKind::Jump,
+                    });
+                }
+                if let Some(f) = b.fail {
+                    successors.push(crate::services::analysis::BlockEdge {
+                        target: f,
+                        kind: crate::services::analysis::BlockEdgeKind::ConditionalJump,
+                    });
+                }
+                blocks_out.push(crate::services::analysis::BasicBlock {
+                    start,
+                    len: b.size.unwrap_or(0) as u32,
+                    successors,
+                });
+            }
+        }
+    }
+    Ok(blocks_out)
+}
+
+#[derive(Debug, Deserialize)]
+struct RizinString {
+    #[serde(default)]
+    vaddr: Option<u64>,
+    #[serde(default)]
+    string: Option<String>,
+}
+
+fn parse_strings(body: &str) -> Result<Vec<EvidenceRecord>, AnalysisError> {
+    let strs: Vec<RizinString> = serde_json::from_str(body)
+        .map_err(|e| AnalysisError::Backend(format!("failed to parse rizin strings JSON: {e}")))?;
+    Ok(strs
+        .into_iter()
+        .filter_map(|s| {
+            s.string.as_ref().map(|text| EvidenceRecord {
+                address: s.vaddr.unwrap_or(0),
+                description: format!("string: {}", text),
+            })
+        })
+        .collect())
 }

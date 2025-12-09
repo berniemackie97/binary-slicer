@@ -1,6 +1,7 @@
 use std::fs;
 
 use crate::commands::open_project_db;
+use crate::commands::rituals::analysis_summary;
 use crate::{canonicalize_or_current, infer_project_name};
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -109,8 +110,14 @@ pub fn project_info_command(root: &str, json: bool) -> Result<()> {
     let slices = db.list_slices().context("Failed to list slices")?;
     let db_runs = db.list_ritual_runs(None).unwrap_or_default();
 
-    let mut ritual_runs: Vec<crate::commands::RitualRunInfo> =
-        db_runs.iter().map(|r| crate::commands::db_run_to_info(&layout, r)).collect();
+    let mut ritual_runs: Vec<crate::commands::RitualRunInfo> = Vec::new();
+    for run in &db_runs {
+        let mut info = crate::commands::db_run_to_info(&layout, run);
+        if let Ok(Some(analysis)) = db.load_analysis_result(&run.binary, &run.ritual) {
+            info.analysis = Some(analysis_summary(&analysis, Some(run)));
+        }
+        ritual_runs.push(info);
+    }
 
     // Include any on-disk runs not yet in the DB (backward compatibility).
     let disk_runs = crate::commands::collect_ritual_runs_on_disk(&layout, None)?;
@@ -178,6 +185,10 @@ pub fn project_info_command(root: &str, json: bool) -> Result<()> {
     println!();
     println!("Ritual specs: {}", ritual_specs.len());
     println!("Ritual runs: {}", ritual_runs.len());
+    if !ritual_runs.is_empty() {
+        let analyzed = ritual_runs.iter().filter(|r| r.analysis.is_some()).count();
+        println!("Analyzed runs: {} with stored analysis", analyzed);
+    }
 
     Ok(())
 }

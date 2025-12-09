@@ -183,7 +183,7 @@ fn direct_project_and_slice_commands_execute() {
     list_binaries_command(&root, false).unwrap();
 
     // slice commands
-    init_slice_command(&root, "SliceA", Some("desc".into())).unwrap();
+    init_slice_command(&root, "SliceA", Some("desc".into()), None).unwrap();
     list_slices_command(&root, false).unwrap();
     emit_slice_docs_command(&root).unwrap();
     emit_slice_reports_command(&root).unwrap();
@@ -460,7 +460,7 @@ fn list_and_emit_slices_with_descriptions() {
     let temp = tempdir().unwrap();
     let root = temp.path().to_string_lossy().to_string();
     init_project_command(&root, Some("SlicesProj".into())).unwrap();
-    init_slice_command(&root, "Gameplay", Some("Core gameplay loop".into())).unwrap();
+    init_slice_command(&root, "Gameplay", Some("Core gameplay loop".into()), None).unwrap();
 
     // Human listing should include description and status.
     list_slices_command(&root, false).unwrap();

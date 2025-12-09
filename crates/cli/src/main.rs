@@ -89,6 +89,10 @@ enum Command {
         /// Optional human-readable description of the slice.
         #[arg(long)]
         description: Option<String>,
+
+        /// Optional default binary this slice is associated with.
+        #[arg(long)]
+        binary: Option<String>,
     },
 
     /// List all slices registered in the project database.
@@ -306,8 +310,8 @@ fn main() -> Result<()> {
         Command::AddBinary { root, path, name, arch, hash, skip_hash } => {
             commands::add_binary_command(&root, &path, name, arch, hash, skip_hash)?
         }
-        Command::InitSlice { root, name, description } => {
-            commands::init_slice_command(&root, &name, description)?
+        Command::InitSlice { root, name, description, binary } => {
+            commands::init_slice_command(&root, &name, description, binary)?
         }
         Command::ListSlices { root, json } => commands::list_slices_command(&root, json)?,
         Command::ListBinaries { root, json } => commands::list_binaries_command(&root, json)?,
