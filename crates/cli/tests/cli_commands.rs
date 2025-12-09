@@ -144,6 +144,7 @@ fn project_info_json_output() {
     assert!(v["layout"]["outputs_dir"].as_str().unwrap().ends_with("outputs"));
     assert_eq!(v["ritual_specs"].as_array().unwrap().len(), 0);
     assert_eq!(v["ritual_runs"].as_array().unwrap().len(), 0);
+    assert!(!v["available_backends"].as_array().unwrap().is_empty());
 }
 
 /// `project-info --json` should include runs/specs when present.

@@ -12,6 +12,8 @@ pub struct ProjectInfoSnapshot {
     pub config_file: String,
     pub config_version: String,
     pub db_path: String,
+    pub default_backend: Option<String>,
+    pub available_backends: Vec<String>,
     pub layout: ProjectInfoLayout,
     pub binaries: Vec<ritual_core::db::BinaryRecord>,
     pub slices: Vec<ritual_core::db::SliceRecord>,
@@ -120,6 +122,7 @@ pub fn project_info_command(root: &str, json: bool) -> Result<()> {
     let ritual_specs =
         crate::commands::collect_ritual_specs(&layout.rituals_dir).unwrap_or_default();
 
+    let available_backends = ritual_core::services::analysis::default_backend_registry().names();
     if json {
         let snapshot = ProjectInfoSnapshot {
             name: config.name.clone(),
@@ -127,6 +130,8 @@ pub fn project_info_command(root: &str, json: bool) -> Result<()> {
             config_file: layout.project_config_path.display().to_string(),
             config_version: config.config_version.clone(),
             db_path: config.db.path.clone(),
+            default_backend: config.default_backend.clone(),
+            available_backends: available_backends.clone(),
             layout: ProjectInfoLayout {
                 meta_dir: layout.meta_dir.display().to_string(),
                 docs_dir: layout.docs_dir.display().to_string(),
@@ -153,6 +158,10 @@ pub fn project_info_command(root: &str, json: bool) -> Result<()> {
     println!("Config file: {}", layout.project_config_path.display());
     println!("Config version: {}", config.config_version);
     println!("DB path (config): {}", config.db.path);
+    if let Some(backend) = &config.default_backend {
+        println!("Default backend: {}", backend);
+    }
+    println!("Available backends: {}", available_backends.join(", "));
     println!();
 
     // Basic directory existence checks.

@@ -173,5 +173,13 @@ pub fn default_backend_registry() -> BackendRegistry {
     {
         registry.register(crate::services::backends::CapstoneBackend);
     }
+    #[cfg(feature = "rizin-backend")]
+    {
+        registry.register(crate::services::backends::RizinBackend);
+    }
+    #[cfg(feature = "ghidra-backend")]
+    {
+        registry.register(crate::services::backends::GhidraBackend);
+    }
     registry
 }

@@ -22,6 +22,10 @@ pub fn list_backends_command(json: bool) -> Result<()> {
                         .to_string()
                 }
                 "capstone" => "Capstone-based quick disassembly (x86_64 demo)".to_string(),
+                "ghidra" => {
+                    "Ghidra headless stub (requires GHIDRA_ANALYZE_HEADLESS or GHIDRA_INSTALL_DIR)"
+                        .to_string()
+                }
                 other => format!("Backend '{}'", other),
             };
             BackendInfo { name: name.clone(), description }

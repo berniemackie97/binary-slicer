@@ -18,6 +18,7 @@ Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of na
   - `emit-slice-docs` / `emit-slice-reports` regenerate docs and JSON reports from the DB.
   - `list-slices` / `list-binaries` show stored metadata (human or JSON).
   - `project-info` reports core paths and directory health (human or JSON).
+    - JSON includes `available_backends` and optional `default_backend` (settable in `.ritual/project.json`).
   - `run-ritual` loads a ritual spec (YAML/JSON), validates it, and creates a per-binary output scaffold under `outputs/binaries/<binary>/<ritual>/` (use `--force` to overwrite an existing run). Emits `spec.yaml`, `report.json`, and `run_metadata.json` (hashes + timestamps).
   - `list-ritual-specs` lists ritual specs under `rituals/` (human/JSON).
   - `list-ritual-runs` enumerates runs discovered under `outputs/binaries` (human/JSON).
@@ -113,6 +114,12 @@ binary-slicer clean-outputs --root /path/to/workdir --all --yes
 ```
 
 Slice docs live at `docs/slices/<Name>.md` and are meant to be edited by humans while also regenerated from analysis later. Reports/graphs will be emitted to `reports/` and `graphs/` respectively once the analysis pipeline is wired.
+
+### Backend features
+
+- `capstone-backend`: enables a Capstone-based backend (x86_64 demo) and makes it available via `--backend capstone`.
+- `rizin-backend`: registers a rizin-backed analyzer that validates the binary and captures `rizin -v` as evidence; ensure `rizin` is installed and on PATH.
+- `ghidra-backend`: registers a Ghidra headless stub (requires `GHIDRA_ANALYZE_HEADLESS` pointing to `analyzeHeadless` or `GHIDRA_INSTALL_DIR`); Ghidra version is recorded as evidence.
 
 ## Project layout
 
