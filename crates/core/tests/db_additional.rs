@@ -13,14 +13,16 @@ fn binary_record_new_defaults() {
     assert!(bin.hash.is_none());
 }
 
-/// Ensure SliceRecord builder sets description.
+/// Ensure SliceRecord builders set description and default binary.
 #[test]
-fn slice_record_builder_sets_description() {
-    let slice =
-        SliceRecord::new("Telemetry", SliceStatus::Draft).with_description(Some("desc".into()));
+fn slice_record_builder_sets_description_and_binary() {
+    let slice = SliceRecord::new("Telemetry", SliceStatus::Draft)
+        .with_description(Some("desc".into()))
+        .with_default_binary(Some("BinA".into()));
     assert_eq!(slice.name, "Telemetry");
     assert_eq!(slice.status, SliceStatus::Draft);
     assert_eq!(slice.description.as_deref(), Some("desc"));
+    assert_eq!(slice.default_binary.as_deref(), Some("BinA"));
 }
 
 /// ProjectSnapshot should serialize/deserialize as expected.

@@ -129,6 +129,10 @@ enum Command {
         /// Project root directory. Defaults to the current working directory.
         #[arg(long, default_value = ".")]
         root: String,
+
+        /// Prefer analysis runs for this binary when choosing data per slice (falls back to slice default or any).
+        #[arg(long)]
+        binary: Option<String>,
     },
 
     /// Run a ritual spec (YAML/JSON) against a target binary (analysis stub for now).
@@ -316,7 +320,9 @@ fn main() -> Result<()> {
         Command::ListSlices { root, json } => commands::list_slices_command(&root, json)?,
         Command::ListBinaries { root, json } => commands::list_binaries_command(&root, json)?,
         Command::EmitSliceDocs { root } => commands::emit_slice_docs_command(&root)?,
-        Command::EmitSliceReports { root } => commands::emit_slice_reports_command(&root)?,
+        Command::EmitSliceReports { root, binary } => {
+            commands::emit_slice_reports_command(&root, binary.as_deref())?
+        }
         Command::RunRitual { root, file, backend, force } => {
             commands::run_ritual_command(&root, &file, backend.as_deref(), force)?
         }

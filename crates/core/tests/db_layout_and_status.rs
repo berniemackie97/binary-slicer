@@ -27,11 +27,13 @@ fn project_layout_uses_expected_paths() {
 
 #[test]
 fn slice_record_and_status_round_trip() {
-    let slice = SliceRecord::new("AutoUpdateManager", SliceStatus::Active);
+    let slice = SliceRecord::new("AutoUpdateManager", SliceStatus::Active)
+        .with_default_binary(Some("BinA".into()));
     let json = serde_json::to_string(&slice).unwrap();
     let deserialized: SliceRecord = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized.name, "AutoUpdateManager");
     assert_eq!(deserialized.status, SliceStatus::Active);
+    assert_eq!(deserialized.default_binary.as_deref(), Some("BinA"));
 
     // Explicitly test status mapping.
     assert_eq!(SliceStatus::Planned.to_i32(), 0);

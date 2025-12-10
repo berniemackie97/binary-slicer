@@ -1,3 +1,4 @@
+use assert_cmd::cargo::cargo_bin_cmd;
 use binary_slicer::commands::{
     add_binary_command, clean_outputs_command, collect_ritual_runs_on_disk, collect_ritual_specs,
     emit_slice_docs_command, emit_slice_reports_command, init_project_command, init_slice_command,
@@ -183,14 +184,27 @@ fn direct_project_and_slice_commands_execute() {
     list_binaries_command(&root, false).unwrap();
 
     // slice commands
-    init_slice_command(&root, "SliceA", Some("desc".into()), None).unwrap();
+    init_slice_command(&root, "SliceA", Some("desc".into()), Some("BinA".into())).unwrap();
     list_slices_command(&root, false).unwrap();
     emit_slice_docs_command(&root).unwrap();
-    emit_slice_reports_command(&root).unwrap();
+    emit_slice_reports_command(&root, None).unwrap();
 
     // project-info human and json
     project_info_command(&root, false).unwrap();
     project_info_command(&root, true).unwrap();
+
+    // list-slices shows linked binary in human output
+    let human = cargo_bin_cmd!("binary-slicer")
+        .arg("list-slices")
+        .arg("--root")
+        .arg(&root)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let human_out = String::from_utf8_lossy(&human);
+    assert!(human_out.contains("BinA"));
 }
 
 #[test]
@@ -230,7 +244,7 @@ fn emit_slice_commands_handle_empty_db() {
     init_project_command(&root, Some("EmptyProj".into())).unwrap();
     // No slices registered -> should short-circuit gracefully.
     emit_slice_docs_command(&root).unwrap();
-    emit_slice_reports_command(&root).unwrap();
+    emit_slice_reports_command(&root, None).unwrap();
 }
 
 #[test]
@@ -469,5 +483,5 @@ fn list_and_emit_slices_with_descriptions() {
 
     // Emit docs and reports when slices are present (non-empty branches).
     emit_slice_docs_command(&root).unwrap();
-    emit_slice_reports_command(&root).unwrap();
+    emit_slice_reports_command(&root, None).unwrap();
 }

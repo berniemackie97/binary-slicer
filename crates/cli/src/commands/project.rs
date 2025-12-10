@@ -189,6 +189,14 @@ pub fn project_info_command(root: &str, json: bool) -> Result<()> {
         let analyzed = ritual_runs.iter().filter(|r| r.analysis.is_some()).count();
         println!("Analyzed runs: {} with stored analysis", analyzed);
     }
+    if !slices.is_empty() {
+        println!("\nSlices:");
+        for slice in slices {
+            let bin = slice.default_binary.as_deref().unwrap_or("(no default binary)");
+            let desc = slice.description.clone().unwrap_or_else(|| "(no description)".into());
+            println!("- {} [{:?}] binary: {} -- {}", slice.name, slice.status, bin, desc);
+        }
+    }
 
     Ok(())
 }

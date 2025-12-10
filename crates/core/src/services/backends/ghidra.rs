@@ -79,7 +79,8 @@ impl AnalysisBackend for GhidraBackend {
             })
             .collect();
 
-        let evidence = vec![EvidenceRecord { address: 0, description: version.clone() }];
+        let evidence =
+            vec![EvidenceRecord { address: 0, description: version.clone(), kind: None }];
 
         Ok(AnalysisResult {
             functions,

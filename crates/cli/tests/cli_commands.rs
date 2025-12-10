@@ -1472,6 +1472,8 @@ fn list_slices_json_output() {
         .arg("Telemetry")
         .arg("--description")
         .arg("Slice desc")
+        .arg("--binary")
+        .arg("BinLinked")
         .assert()
         .success();
 
@@ -1487,11 +1489,11 @@ fn list_slices_json_output() {
         .clone();
 
     let body = String::from_utf8(output).expect("utf8");
-    let slices: Vec<ritual_core::db::SliceRecord> =
-        serde_json::from_str(&body).expect("parse slices json");
+    let slices: Vec<serde_json::Value> = serde_json::from_str(&body).expect("parse slices json");
     assert_eq!(slices.len(), 1);
-    assert_eq!(slices[0].name, "Telemetry");
-    assert_eq!(slices[0].description.as_deref(), Some("Slice desc"));
+    assert_eq!(slices[0]["name"], "Telemetry");
+    assert_eq!(slices[0]["description"], "Slice desc");
+    assert_eq!(slices[0]["default_binary"], "BinLinked");
 }
 
 /// `list-binaries --json` should emit JSON with hash values.

@@ -25,7 +25,11 @@ impl AnalysisBackend for NoopBackend {
                 })
                 .collect(),
             call_edges: vec![],
-            evidence: vec![EvidenceRecord { address: 0, description: "noop backend".into() }],
+            evidence: vec![EvidenceRecord {
+                address: 0,
+                description: "noop backend".into(),
+                kind: None,
+            }],
             basic_blocks: vec![],
             backend_version: Some("noop-1.0".into()),
             backend_path: None,

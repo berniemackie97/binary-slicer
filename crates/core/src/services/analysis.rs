@@ -30,6 +30,18 @@ pub struct CallEdge {
 pub struct EvidenceRecord {
     pub address: u64,
     pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<EvidenceKind>,
+}
+
+/// Optional classification for evidence entries to support grouping in reports.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceKind {
+    String,
+    Import,
+    Call,
+    Other,
 }
 
 /// Kind of control-flow edge for a basic block successor.

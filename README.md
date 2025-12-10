@@ -12,7 +12,7 @@ Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of na
 - Persistent project database (`.ritual/project.db`) and config (`.ritual/project.json`).
 - CLI scaffolding for projects, binaries, slices, and ritual runs:
   - `init-project` creates `.ritual`, docs/reports/graphs dirs, config, and DB.
-  - `list-backends` shows available analysis backends (defaults to `validate-only`; enable optional Capstone/rizin/Ghidra backends via Cargo features).
+  - `list-backends` shows available analysis backends (defaults to `validate-only`; enable optional Capstone/rizin/Ghidra backends via Cargo features). Backend selection order when running a ritual: CLI `--backend` > spec `backend` > project `default_backend` > auto-pick (rizin if available, then capstone, then validate-only).
   - `add-binary` registers binaries with arch + SHA-256 (or user-provided) hash.
   - `init-slice` inserts slice records and scaffolds docs under `docs/slices/<Name>.md` (optionally link the slice to a default binary via `--binary` so later reports/graphs pull the right analysis run).
   - `emit-slice-docs` / `emit-slice-reports` regenerate docs and JSON reports from the DB.
@@ -53,6 +53,7 @@ binary-slicer add-binary --root /path/to/workdir --path /path/to/libExampleGame.
 
 # 3) Create a slice scaffold
 binary-slicer init-slice --root /path/to/workdir --name AutoUpdateManager --description "Handles OTA updates" --binary libExampleGame.so
+# Backend selection order for rituals: CLI `--backend` > spec `backend` > project `default_backend` > auto-pick (rizin if available, then capstone, then validate-only).
 
 # 4) List what you have
 binary-slicer list-slices --root /path/to/workdir

@@ -35,6 +35,7 @@ fn analysis_result_is_persisted_with_run() {
         evidence: vec![ritual_core::services::analysis::EvidenceRecord {
             address: 0x1000,
             description: "string: test".into(),
+            kind: None,
         }],
         basic_blocks: vec![BasicBlock {
             start: 0x1000,

@@ -11,7 +11,7 @@ use crate::db::{BinaryRecord, RitualRunRecord, RitualRunStatus, SliceRecord, Sli
 const MIN_SUPPORTED_SCHEMA_VERSION: i32 = 0;
 
 /// Latest schema version this crate knows about.
-pub const CURRENT_SCHEMA_VERSION: i32 = 6;
+pub const CURRENT_SCHEMA_VERSION: i32 = 7;
 
 /// Error type for project database operations.
 #[derive(Debug, Error)]
@@ -219,12 +219,13 @@ impl ProjectDb {
         {
             let mut stmt = tx.prepare(
                 r#"
-                INSERT OR REPLACE INTO analysis_evidence (run_id, address, description)
-                VALUES (?1, ?2, ?3)
+                INSERT OR REPLACE INTO analysis_evidence (run_id, address, description, kind)
+                VALUES (?1, ?2, ?3, ?4)
                 "#,
             )?;
             for ev in &result.evidence {
-                stmt.execute(params![run_id, ev.address as i64, ev.description])?;
+                let kind_str = ev.kind.as_ref().map(evidence_kind_to_str);
+                stmt.execute(params![run_id, ev.address as i64, ev.description, kind_str])?;
             }
         }
 
@@ -354,7 +355,7 @@ impl ProjectDb {
         {
             let mut stmt = self.conn.prepare(
                 r#"
-                SELECT address, description FROM analysis_evidence
+                SELECT address, description, kind FROM analysis_evidence
                 WHERE run_id = ?1
                 "#,
             )?;
@@ -362,6 +363,7 @@ impl ProjectDb {
                 Ok(crate::services::analysis::EvidenceRecord {
                     address: row.get::<_, i64>(0)? as u64,
                     description: row.get(1)?,
+                    kind: parse_evidence_kind(row.get::<_, Option<String>>(2)?),
                 })
             })?;
             for r in rows {
@@ -595,7 +597,8 @@ fn apply_migrations(conn: &Connection) -> DbResult<()> {
             CREATE TABLE IF NOT EXISTS analysis_evidence (
                 run_id     INTEGER NOT NULL,
                 address    INTEGER NOT NULL,
-                description TEXT NOT NULL
+                description TEXT NOT NULL,
+                kind        TEXT
             );
             PRAGMA user_version = 5;
             COMMIT;
@@ -617,6 +620,14 @@ fn apply_migrations(conn: &Connection) -> DbResult<()> {
         if !has_column {
             conn.execute("ALTER TABLE slices ADD COLUMN default_binary TEXT;", [])?;
         }
+    }
+
+    if current_version < 7 {
+        let has_kind = column_exists(conn, "analysis_evidence", "kind")?;
+        if !has_kind {
+            conn.execute("ALTER TABLE analysis_evidence ADD COLUMN kind TEXT;", [])?;
+        }
+        conn.execute("PRAGMA user_version = 7;", [])?;
     }
 
     Ok(())
@@ -648,6 +659,25 @@ fn parse_edge_kind(kind: &str) -> crate::services::analysis::BlockEdgeKind {
         "Call" | "call" => crate::services::analysis::BlockEdgeKind::Call,
         "IndirectCall" | "icall" => crate::services::analysis::BlockEdgeKind::IndirectCall,
         _ => crate::services::analysis::BlockEdgeKind::Fallthrough,
+    }
+}
+
+fn evidence_kind_to_str(kind: &crate::services::analysis::EvidenceKind) -> &'static str {
+    match kind {
+        crate::services::analysis::EvidenceKind::String => "string",
+        crate::services::analysis::EvidenceKind::Import => "import",
+        crate::services::analysis::EvidenceKind::Call => "call",
+        crate::services::analysis::EvidenceKind::Other => "other",
+    }
+}
+
+fn parse_evidence_kind(kind: Option<String>) -> Option<crate::services::analysis::EvidenceKind> {
+    match kind.as_deref() {
+        Some("string") => Some(crate::services::analysis::EvidenceKind::String),
+        Some("import") => Some(crate::services::analysis::EvidenceKind::Import),
+        Some("call") => Some(crate::services::analysis::EvidenceKind::Call),
+        Some("other") => Some(crate::services::analysis::EvidenceKind::Other),
+        _ => None,
     }
 }
 

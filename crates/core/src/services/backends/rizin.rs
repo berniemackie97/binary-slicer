@@ -45,17 +45,38 @@ impl AnalysisBackend for RizinBackend {
             parse_basic_blocks(&json)?
         };
 
-        let mut evidence = vec![EvidenceRecord { address: 0, description: version.clone() }];
-        // Strings as evidence.
-        let strings_json = std::env::var_os("BS_RIZIN_FAKE_STRINGS")
-            .map(|p| fs::read_to_string(&p).map_err(|e| e.to_string()))
-            .transpose()
-            .map_err(AnalysisError::Backend)?
-            .unwrap_or_else(|| {
-                run_rizin_json(&rizin_path, &request.binary_path, "izj").unwrap_or_default()
-            });
-        if !strings_json.is_empty() {
-            evidence.extend(parse_strings(&strings_json)?);
+        let mut evidence = vec![EvidenceRecord {
+            address: 0,
+            description: version.clone(),
+            kind: Some(crate::services::analysis::EvidenceKind::Other),
+        }];
+
+        // Strings as evidence (optional).
+        if request.options.include_strings {
+            let strings_json = std::env::var_os("BS_RIZIN_FAKE_STRINGS")
+                .map(|p| fs::read_to_string(&p).map_err(|e| e.to_string()))
+                .transpose()
+                .map_err(AnalysisError::Backend)?
+                .unwrap_or_else(|| {
+                    run_rizin_json(&rizin_path, &request.binary_path, "izj").unwrap_or_default()
+                });
+            if !strings_json.is_empty() {
+                evidence.extend(parse_strings(&strings_json)?);
+            }
+        }
+
+        // Imports as evidence (optional).
+        if request.options.include_imports {
+            let imports_json = std::env::var_os("BS_RIZIN_FAKE_IMPORTS")
+                .map(|p| fs::read_to_string(&p).map_err(|e| e.to_string()))
+                .transpose()
+                .map_err(AnalysisError::Backend)?
+                .unwrap_or_else(|| {
+                    run_rizin_json(&rizin_path, &request.binary_path, "iij").unwrap_or_default()
+                });
+            if !imports_json.is_empty() {
+                evidence.extend(parse_imports(&imports_json)?);
+            }
         }
 
         Ok(AnalysisResult {
@@ -117,6 +138,13 @@ fn parse_functions(body: &str) -> Result<(Vec<FunctionRecord>, Vec<CallEdge>), A
                         to: cref.addr.unwrap_or(0),
                         is_cross_slice: false,
                     });
+                    if let Some(name) = cref.name {
+                        evidence.push(EvidenceRecord {
+                            address: from,
+                            description: format!("call -> {}", name),
+                            kind: Some(crate::services::analysis::EvidenceKind::Call),
+                        });
+                    }
                 }
             }
         }
@@ -162,6 +190,8 @@ struct RizinCallRef {
     #[serde(default)]
     #[serde(rename = "type")]
     typ: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -226,6 +256,16 @@ struct RizinString {
     string: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct RizinImport {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    plt: Option<u64>,
+    #[serde(default)]
+    bind: Option<String>,
+}
+
 fn parse_strings(body: &str) -> Result<Vec<EvidenceRecord>, AnalysisError> {
     let strs: Vec<RizinString> = serde_json::from_str(body)
         .map_err(|e| AnalysisError::Backend(format!("failed to parse rizin strings JSON: {e}")))?;
@@ -235,6 +275,22 @@ fn parse_strings(body: &str) -> Result<Vec<EvidenceRecord>, AnalysisError> {
             s.string.as_ref().map(|text| EvidenceRecord {
                 address: s.vaddr.unwrap_or(0),
                 description: format!("string: {}", text),
+                kind: Some(crate::services::analysis::EvidenceKind::String),
+            })
+        })
+        .collect())
+}
+
+fn parse_imports(body: &str) -> Result<Vec<EvidenceRecord>, AnalysisError> {
+    let imports: Vec<RizinImport> = serde_json::from_str(body)
+        .map_err(|e| AnalysisError::Backend(format!("failed to parse rizin imports JSON: {e}")))?;
+    Ok(imports
+        .into_iter()
+        .filter_map(|imp| {
+            imp.name.as_ref().map(|name| EvidenceRecord {
+                address: imp.plt.unwrap_or(0),
+                description: format!("import: {}", name),
+                kind: Some(crate::services::analysis::EvidenceKind::Import),
             })
         })
         .collect())

@@ -365,12 +365,13 @@ fn operand_evidence(
                     {
                         if let Some(preview) = preview_for(sec, *imm as u64) {
                             evidence.push(EvidenceRecord {
-                                    address,
-                                    description: format!(
-                                        "xref imm 0x{imm:X} -> section {} (0x{:X}-0x{:X}) preview=\"{preview}\"",
-                                        sec.name, sec.start, sec.end
-                                    ),
-                                });
+                                address,
+                                description: format!(
+                                    "xref imm 0x{imm:X} -> section {} (0x{:X}-0x{:X}) preview=\"{preview}\"",
+                                    sec.name, sec.start, sec.end
+                                ),
+                                kind: None,
+                            });
                         } else {
                             evidence.push(EvidenceRecord {
                                 address,
@@ -378,6 +379,7 @@ fn operand_evidence(
                                     "xref imm 0x{imm:X} -> section {} (0x{:X}-0x{:X})",
                                     sec.name, sec.start, sec.end
                                 ),
+                                kind: None,
                             });
                         }
                     }
@@ -386,6 +388,7 @@ fn operand_evidence(
                     evidence.push(EvidenceRecord {
                         address,
                         description: format!("reg operand {:?}", reg.0),
+                        kind: None,
                     });
                 }
                 capstone::arch::x86::X86OperandType::Mem(mem) => {
@@ -398,6 +401,7 @@ fn operand_evidence(
                             mem.index().0,
                             mem.scale()
                         ),
+                        kind: None,
                     });
                 }
                 _ => {}
@@ -414,6 +418,7 @@ fn operand_evidence(
                                     "xref imm 0x{imm:X} -> section {} (0x{:X}-0x{:X}) preview=\"{preview}\"",
                                     sec.name, sec.start, sec.end
                                 ),
+                                kind: None,
                             });
                         } else {
                             evidence.push(EvidenceRecord {
@@ -422,6 +427,7 @@ fn operand_evidence(
                                     "xref imm 0x{imm:X} -> section {} (0x{:X}-0x{:X})",
                                     sec.name, sec.start, sec.end
                                 ),
+                                kind: None,
                             });
                         }
                     }
@@ -430,6 +436,7 @@ fn operand_evidence(
                     evidence.push(EvidenceRecord {
                         address,
                         description: format!("reg operand {:?}", reg.0),
+                        kind: None,
                     });
                 }
             }
@@ -445,6 +452,7 @@ fn operand_evidence(
                                         "xref imm 0x{imm:X} -> section {} (0x{:X}-0x{:X}) preview=\"{preview}\"",
                                         sec.name, sec.start, sec.end
                                     ),
+                                    kind: None,
                                 });
                         } else {
                             evidence.push(EvidenceRecord {
@@ -453,6 +461,7 @@ fn operand_evidence(
                                     "xref imm 0x{imm:X} -> section {} (0x{:X}-0x{:X})",
                                     sec.name, sec.start, sec.end
                                 ),
+                                kind: None,
                             });
                         }
                     }
@@ -461,6 +470,7 @@ fn operand_evidence(
                     evidence.push(EvidenceRecord {
                         address,
                         description: format!("reg operand {:?}", reg.0),
+                        kind: None,
                     });
                 }
                 _ => {}
@@ -527,6 +537,7 @@ impl AnalysisBackend for CapstoneBackend {
                             )
                             .trim()
                             .to_string(),
+                            kind: None,
                         });
                         current_block_len += 1;
 
@@ -578,6 +589,7 @@ impl AnalysisBackend for CapstoneBackend {
                                             i.address(),
                                             target
                                         ),
+                                        kind: None,
                                     });
                                 }
                             } else if is_jump {
@@ -672,6 +684,7 @@ impl AnalysisBackend for CapstoneBackend {
                         )
                         .trim()
                         .to_string(),
+                        kind: None,
                     });
                     current_block_len += 1;
                     if let Ok(detail) = cs.insn_detail(i) {
@@ -687,6 +700,7 @@ impl AnalysisBackend for CapstoneBackend {
                                     description: format!(
                                         "basic_block start=0x{start_addr:016X} len={current_block_len}"
                                     ),
+                                    kind: None,
                                 });
                             }
                             current_block_start = i.address().checked_add(i.bytes().len() as u64);
@@ -709,6 +723,7 @@ impl AnalysisBackend for CapstoneBackend {
                                         i.address(),
                                         target
                                     ),
+                                    kind: None,
                                 });
                             }
                         }

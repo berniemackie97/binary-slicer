@@ -98,8 +98,18 @@ pub fn list_slices_command(root: &str, json: bool) -> Result<()> {
     let slices = db.list_slices().context("Failed to list slices")?;
 
     if json {
-        let serialized = serde_json::to_string_pretty(&slices)?;
-        println!("{}", serialized);
+        let payload: Vec<serde_json::Value> = slices
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "name": s.name,
+                    "description": s.description,
+                    "default_binary": s.default_binary,
+                    "status": format!("{:?}", s.status),
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&payload)?);
         return Ok(());
     }
 
@@ -112,7 +122,8 @@ pub fn list_slices_command(root: &str, json: bool) -> Result<()> {
     println!("Slices:");
     for slice in slices {
         let desc = slice.description.unwrap_or_else(|| "(no description)".to_string());
-        println!("- {} ({:?}) - {}", slice.name, slice.status, desc);
+        let bin = slice.default_binary.as_deref().unwrap_or("(no default binary)");
+        println!("- {} ({:?}) - {} [binary: {}]", slice.name, slice.status, desc, bin);
     }
 
     Ok(())
@@ -147,6 +158,7 @@ pub fn emit_slice_docs_command(root: &str) -> Result<()> {
     let db = ProjectDb::open(&db_path)
         .with_context(|| format!("Failed to open project database at {}", db_path.display()))?;
 
+    let runs = db.list_ritual_runs(None).unwrap_or_default();
     let slices = db.list_slices().context("Failed to list slices")?;
     if slices.is_empty() {
         println!("No slices to emit docs for.");
@@ -163,11 +175,46 @@ pub fn emit_slice_docs_command(root: &str) -> Result<()> {
         } else {
             contents.push_str("TODO: add a human-readable description of this slice.\n\n");
         }
+        if let Some(bin) = &slice.default_binary {
+            contents.push_str(&format!("**Default binary:** {}\n\n", bin));
+        }
         contents.push_str(
             "## Roots\n- TODO: list root functions (by address/name) that define this slice.\n\n",
         );
-        contents.push_str("## Functions\n- TODO: populated by analysis runs.\n\n");
-        contents.push_str("## Evidence\n- TODO: xrefs, strings, patterns that justify membership in this slice.\n");
+        // Pull analysis (latest matching run) to populate functions/evidence if available.
+        let latest_run = latest_run_for_slice(&slice, None, &runs);
+        let analysis = latest_run
+            .and_then(|run| db.load_analysis_result(&run.binary, &run.ritual).ok())
+            .flatten();
+        contents.push_str("## Functions\n");
+        if let Some(a) = &analysis {
+            if a.functions.is_empty() {
+                contents.push_str("- (no functions recorded)\n\n");
+            } else {
+                for f in &a.functions {
+                    let label = f.name.clone().unwrap_or_else(|| format!("0x{:X}", f.address));
+                    contents.push_str(&format!("- {} @ 0x{:X}\n", label, f.address));
+                }
+                contents.push('\n');
+            }
+        } else {
+            contents.push_str("- TODO: populated by analysis runs.\n\n");
+        }
+
+        contents.push_str("## Evidence\n");
+        if let Some(a) = &analysis {
+            if a.evidence.is_empty() {
+                contents.push_str("- (no evidence recorded)\n");
+            } else {
+                for e in &a.evidence {
+                    contents.push_str(&format!("- 0x{:X}: {}\n", e.address, e.description));
+                }
+            }
+        } else {
+            contents.push_str(
+                "- TODO: xrefs, strings, patterns that justify membership in this slice.\n",
+            );
+        }
 
         fs::write(&doc_path, contents)
             .with_context(|| format!("Failed to write slice doc at {}", doc_path.display()))?;
@@ -178,7 +225,7 @@ pub fn emit_slice_docs_command(root: &str) -> Result<()> {
 }
 
 /// Regenerate slice reports for all slices in the DB.
-pub fn emit_slice_reports_command(root: &str) -> Result<()> {
+pub fn emit_slice_reports_command(root: &str, preferred_binary: Option<&str>) -> Result<()> {
     use ritual_core::db::{ProjectConfig, ProjectDb, ProjectLayout};
 
     let root_path = canonicalize_or_current(root)?;
@@ -220,7 +267,7 @@ pub fn emit_slice_reports_command(root: &str) -> Result<()> {
 
         // Heuristic: use the latest ritual run whose name matches the slice name.
         let all_runs = db.list_ritual_runs(None).unwrap_or_default();
-        let latest_run = latest_run_for_slice(&slice, &all_runs);
+        let latest_run = latest_run_for_slice(&slice, preferred_binary, &all_runs);
         let analysis = latest_run
             .and_then(|run| db.load_analysis_result(&run.binary, &run.ritual).ok())
             .flatten();
@@ -312,13 +359,17 @@ fn render_dot_from_analysis(analysis: Option<&AnalysisResult>) -> String {
 
 fn latest_run_for_slice<'a>(
     slice: &SliceRecord,
+    preferred_binary: Option<&str>,
     runs: &'a [RitualRunRecord],
 ) -> Option<&'a RitualRunRecord> {
     let filtered: Vec<&RitualRunRecord> = runs
         .iter()
         .filter(|r| {
             r.ritual == slice.name
-                && slice.default_binary.as_ref().map(|b| &r.binary == b).unwrap_or(true)
+                && preferred_binary
+                    .map(|b| r.binary == b)
+                    .or_else(|| slice.default_binary.as_ref().map(|b| r.binary == *b))
+                    .unwrap_or(true)
         })
         .collect();
     if !filtered.is_empty() {

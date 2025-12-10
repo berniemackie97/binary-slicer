@@ -25,7 +25,7 @@ fn emit_slice_reports_errors_when_db_missing() {
     cfg.db.path = ".ritual/project.json/bad.db".into();
     std::fs::write(&layout.project_config_path, serde_json::to_string_pretty(&cfg).unwrap())
         .unwrap();
-    let err = emit_slice_reports_command(&root).unwrap_err();
+    let err = emit_slice_reports_command(&root, None).unwrap_err();
     assert!(err.to_string().contains("Failed to open project database"), "unexpected error: {err}");
 }
 

@@ -40,10 +40,13 @@ fn rizin_backend_parses_fake_json_without_rizin_installed() {
     .unwrap();
     let fake_strings = temp.path().join("strings.json");
     std::fs::write(&fake_strings, r#"[{"vaddr":8192,"string":"hello"}]"#).unwrap();
+    let fake_imports = temp.path().join("imports.json");
+    std::fs::write(&fake_imports, r#"[{"name":"printf","plt":12288}]"#).unwrap();
     std::env::set_var("BS_RIZIN_FAKE_JSON", &fake_json);
     std::env::set_var("BS_RIZIN_FAKE_VERSION", "rizin 1.0-fake");
     std::env::set_var("BS_RIZIN_FAKE_GRAPH", &fake_graph);
     std::env::set_var("BS_RIZIN_FAKE_STRINGS", &fake_strings);
+    std::env::set_var("BS_RIZIN_FAKE_IMPORTS", &fake_imports);
 
     let req = AnalysisRequest {
         ritual_name: "Fake".into(),
@@ -61,10 +64,13 @@ fn rizin_backend_parses_fake_json_without_rizin_installed() {
     assert_eq!(result.call_edges[0].from, 4096);
     assert_eq!(result.call_edges[0].to, 12288);
     assert!(!result.basic_blocks.is_empty());
-    assert!(!result.evidence.is_empty());
+    assert!(result.evidence.iter().any(|e| e.description.contains("string:")));
+    assert!(result.evidence.iter().any(|e| e.description.contains("import:")));
+    assert!(result.evidence.iter().any(|e| e.description.contains("call ->")));
 
     std::env::remove_var("BS_RIZIN_FAKE_JSON");
     std::env::remove_var("BS_RIZIN_FAKE_VERSION");
     std::env::remove_var("BS_RIZIN_FAKE_GRAPH");
     std::env::remove_var("BS_RIZIN_FAKE_STRINGS");
+    std::env::remove_var("BS_RIZIN_FAKE_IMPORTS");
 }

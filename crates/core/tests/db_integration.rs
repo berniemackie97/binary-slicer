@@ -27,7 +27,8 @@ fn project_db_initializes_and_handles_binaries_and_slices() {
         assert_eq!(binaries[0].path, bin.path);
 
         // Insert a slice.
-        let slice = SliceRecord::new("AutoUpdateManager", SliceStatus::Active);
+        let slice = SliceRecord::new("AutoUpdateManager", SliceStatus::Active)
+            .with_default_binary(Some("libExampleGame.so".into()));
         let sid = db.insert_slice(&slice).expect("insert slice");
         assert!(sid > 0);
 
@@ -53,6 +54,7 @@ fn project_db_initializes_and_handles_binaries_and_slices() {
         let slices = db.list_slices().expect("list slices");
         assert_eq!(slices.len(), 1);
         assert_eq!(slices[0].name, "AutoUpdateManager");
+        assert_eq!(slices[0].default_binary.as_deref(), Some("libExampleGame.so"));
 
         let runs = db.list_ritual_runs(None).expect("list ritual runs");
         assert!(runs.is_empty());

@@ -24,6 +24,34 @@ fn default_backend_name() -> String {
     DEFAULT_BACKEND_NAME.to_string()
 }
 
+fn resolve_backend_choice(
+    registry: &ritual_core::services::analysis::BackendRegistry,
+    override_backend: Option<&str>,
+    spec_backend: Option<String>,
+    config: &ritual_core::db::ProjectConfig,
+) -> String {
+    if let Some(b) = override_backend {
+        return b.to_string();
+    }
+    if let Some(b) = spec_backend {
+        if registry.get(&b).is_some() {
+            return b;
+        }
+    }
+    if let Some(b) = &config.default_backend {
+        if registry.get(b).is_some() {
+            return b.clone();
+        }
+    }
+    // Prefer rizin if available, else capstone, else validate-only.
+    for candidate in ["rizin", "capstone", DEFAULT_BACKEND_NAME] {
+        if registry.get(candidate).is_some() {
+            return candidate.to_string();
+        }
+    }
+    DEFAULT_BACKEND_NAME.to_string()
+}
+
 fn render_dot(result: &AnalysisResult) -> String {
     let mut out = String::from("digraph G {\n  rankdir=LR;\n");
     if result.functions.is_empty() && result.call_edges.is_empty() && result.basic_blocks.is_empty()
@@ -271,12 +299,10 @@ pub fn run_ritual_command(
         None
     };
 
-    // Choose backend (CLI override > spec > default), then persist normalized spec copy.
-    let backend_name = backend_override
-        .map(|s| s.to_string())
-        .or_else(|| config.default_backend.clone())
-        .or_else(|| spec.backend.clone())
-        .unwrap_or_else(default_backend_name);
+    // Choose backend (CLI override > spec > config/default preference).
+    let backends = default_backend_registry();
+    let backend_name =
+        resolve_backend_choice(&backends, backend_override, spec.backend.clone(), &config);
     let mut spec_copy = spec;
     if spec_copy.outputs.is_none() {
         spec_copy.outputs = Some(RitualOutputs { reports: true, graphs: true, docs: true });
@@ -289,7 +315,6 @@ pub fn run_ritual_command(
     })?;
 
     // Invoke analysis service (validate-only default backend for now).
-    let backends = default_backend_registry();
     let backend = backends.get(&backend_name).ok_or_else(|| {
         anyhow!("Backend '{}' not found (available: {:?})", backend_name, backends.names())
     })?;
@@ -301,8 +326,8 @@ pub fn run_ritual_command(
         arch: target_bin.arch.clone(),
         options: AnalysisOptions {
             max_depth: spec_copy.max_depth,
-            include_imports: false,
-            include_strings: false,
+            include_imports: true,
+            include_strings: true,
             max_instructions: Some(1024),
         },
     };
@@ -447,12 +472,10 @@ pub fn rerun_ritual_command(
         None
     };
 
-    // Choose backend (CLI override > spec > default), then write normalized spec copy.
-    let backend_name = backend_override
-        .map(|s| s.to_string())
-        .or_else(|| config.default_backend.clone())
-        .or_else(|| spec.backend.clone())
-        .unwrap_or_else(default_backend_name);
+    // Choose backend (CLI override > spec > config/default preference).
+    let backends = default_backend_registry();
+    let backend_name =
+        resolve_backend_choice(&backends, backend_override, spec.backend.clone(), &config);
     if spec.outputs.is_none() {
         spec.outputs = Some(RitualOutputs { reports: true, graphs: true, docs: true });
     }
@@ -464,7 +487,6 @@ pub fn rerun_ritual_command(
     })?;
 
     // Invoke analysis service (validate-only default backend for now).
-    let backends = default_backend_registry();
     let backend = backends.get(&backend_name).ok_or_else(|| {
         anyhow!("Backend '{}' not found (available: {:?})", backend_name, backends.names())
     })?;
@@ -476,8 +498,8 @@ pub fn rerun_ritual_command(
         arch: target_bin.arch.clone(),
         options: AnalysisOptions {
             max_depth: spec.max_depth,
-            include_imports: false,
-            include_strings: false,
+            include_imports: true,
+            include_strings: true,
             max_instructions: Some(1024),
         },
     };
