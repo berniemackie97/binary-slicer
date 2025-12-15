@@ -69,25 +69,33 @@ pub fn collect_ritual_runs_on_disk(
             let run_name = run_entry.file_name().to_string_lossy().to_string();
             let run_path = run_entry.path();
             let metadata_path = run_path.join("run_metadata.json");
-            let (started_at, finished_at, status, spec_hash, backend, backend_version) =
-                if metadata_path.exists() {
-                    match fs::read_to_string(&metadata_path)
-                        .ok()
-                        .and_then(|body| serde_json::from_str::<RitualRunMetadata>(&body).ok())
-                    {
-                        Some(meta) => (
-                            Some(meta.started_at),
-                            Some(meta.finished_at),
-                            Some(meta.status.as_str().to_string()),
-                            Some(meta.spec_hash),
-                            Some(meta.backend),
-                            meta.backend_version,
-                        ),
-                        None => (None, None, None, None, None, None),
-                    }
-                } else {
-                    (None, None, None, None, None, None)
-                };
+            let (
+                started_at,
+                finished_at,
+                status,
+                spec_hash,
+                backend,
+                backend_version,
+                backend_path,
+            ) = if metadata_path.exists() {
+                match fs::read_to_string(&metadata_path)
+                    .ok()
+                    .and_then(|body| serde_json::from_str::<RitualRunMetadata>(&body).ok())
+                {
+                    Some(meta) => (
+                        Some(meta.started_at),
+                        Some(meta.finished_at),
+                        Some(meta.status.as_str().to_string()),
+                        Some(meta.spec_hash),
+                        Some(meta.backend),
+                        meta.backend_version,
+                        meta.backend_path,
+                    ),
+                    None => (None, None, None, None, None, None, None),
+                }
+            } else {
+                (None, None, None, None, None, None, None)
+            };
 
             runs.push(RitualRunInfo {
                 binary: bin_name.clone(),
@@ -99,6 +107,7 @@ pub fn collect_ritual_runs_on_disk(
                 spec_hash,
                 backend,
                 backend_version,
+                backend_path,
                 analysis: None,
             });
         }

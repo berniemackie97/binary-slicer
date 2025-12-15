@@ -22,6 +22,7 @@ fn capstone_request(binary_path: PathBuf, roots: Vec<String>) -> AnalysisRequest
             max_instructions: Some(256),
         },
         arch: Some("x86_64".into()),
+        backend_path: None,
     }
 }
 
@@ -200,6 +201,7 @@ fn capstone_auto_detects_pe_arch_and_symbols() {
             ..Default::default()
         },
         arch: None, // force PE arch detection
+        backend_path: None,
     };
     let result = backend.analyze(&request).expect("analyze pe auto");
     assert!(

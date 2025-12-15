@@ -1,6 +1,8 @@
 #![cfg(feature = "rizin-backend")]
 
-use ritual_core::services::analysis::{AnalysisBackend, AnalysisRequest, AnalysisResult};
+use ritual_core::services::analysis::{
+    AnalysisBackend, AnalysisOptions, AnalysisRequest, AnalysisResult,
+};
 use ritual_core::services::backends::RizinBackend;
 
 #[test]
@@ -13,6 +15,7 @@ fn rizin_backend_errors_for_missing_binary() {
         roots: vec!["entry".into()],
         options: Default::default(),
         arch: None,
+        backend_path: None,
     };
     let err = backend.analyze(&req).unwrap_err();
     assert!(format!("{err:?}").contains("MissingBinary"));
@@ -24,6 +27,7 @@ fn rizin_backend_parses_fake_json_without_rizin_installed() {
     let temp = tempfile::tempdir().unwrap();
     let bin = temp.path().join("bin");
     std::fs::write(&bin, b"bin").unwrap();
+    let fake_rizin_path = temp.path().join("rizin-custom");
 
     // Fake rizin output and version to avoid external dependency in CI.
     let fake_json = temp.path().join("aflj.json");
@@ -53,8 +57,13 @@ fn rizin_backend_parses_fake_json_without_rizin_installed() {
         binary_name: "FakeBin".into(),
         binary_path: bin,
         roots: vec![],
-        options: Default::default(),
+        options: AnalysisOptions {
+            include_imports: true,
+            include_strings: true,
+            ..Default::default()
+        },
         arch: None,
+        backend_path: Some(fake_rizin_path.clone()),
     };
     let result: AnalysisResult = backend.analyze(&req).expect("analyze fake");
     assert_eq!(result.functions.len(), 2);
@@ -67,6 +76,8 @@ fn rizin_backend_parses_fake_json_without_rizin_installed() {
     assert!(result.evidence.iter().any(|e| e.description.contains("string:")));
     assert!(result.evidence.iter().any(|e| e.description.contains("import:")));
     assert!(result.evidence.iter().any(|e| e.description.contains("call ->")));
+    let expected_path = fake_rizin_path.display().to_string();
+    assert_eq!(result.backend_path, Some(expected_path));
 
     std::env::remove_var("BS_RIZIN_FAKE_JSON");
     std::env::remove_var("BS_RIZIN_FAKE_VERSION");

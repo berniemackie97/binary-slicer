@@ -16,6 +16,7 @@ pub struct ProjectInfoSnapshot {
     pub default_backend: Option<String>,
     pub available_backends: Vec<String>,
     pub backends: ritual_core::db::BackendPaths,
+    pub backend_versions: ritual_core::db::BackendVersions,
     pub layout: ProjectInfoLayout,
     pub binaries: Vec<ritual_core::db::BinaryRecord>,
     pub slices: Vec<ritual_core::db::SliceRecord>,
@@ -141,6 +142,7 @@ pub fn project_info_command(root: &str, json: bool) -> Result<()> {
             default_backend: config.default_backend.clone(),
             available_backends: available_backends.clone(),
             backends: config.backends.clone(),
+            backend_versions: config.backend_versions.clone(),
             layout: ProjectInfoLayout {
                 meta_dir: layout.meta_dir.display().to_string(),
                 docs_dir: layout.docs_dir.display().to_string(),
@@ -171,6 +173,18 @@ pub fn project_info_command(root: &str, json: bool) -> Result<()> {
         println!("Default backend: {}", backend);
     }
     println!("Available backends: {}", available_backends.join(", "));
+    if !config.backend_versions.is_empty() {
+        println!("Configured backend versions:");
+        if let Some(v) = &config.backend_versions.rizin {
+            println!("- rizin: {}", v);
+        }
+        if let Some(v) = &config.backend_versions.ghidra_headless {
+            println!("- ghidra: {}", v);
+        }
+        if let Some(v) = &config.backend_versions.capstone {
+            println!("- capstone: {}", v);
+        }
+    }
     println!();
 
     // Basic directory existence checks.
@@ -188,6 +202,23 @@ pub fn project_info_command(root: &str, json: bool) -> Result<()> {
     if !ritual_runs.is_empty() {
         let analyzed = ritual_runs.iter().filter(|r| r.analysis.is_some()).count();
         println!("Analyzed runs: {} with stored analysis", analyzed);
+        println!("Runs:");
+        for run in &ritual_runs {
+            let status = run.status.clone().unwrap_or_else(|| "(unknown)".into());
+            let backend = run.backend.as_deref().unwrap_or("(unknown)");
+            let version = run.backend_version.as_deref().unwrap_or("(unknown)");
+            if let Some(path) = &run.backend_path {
+                println!(
+                    "- {} / {} [{}] backend: {} {} @ {}",
+                    run.binary, run.name, status, backend, version, path
+                );
+            } else {
+                println!(
+                    "- {} / {} [{}] backend: {} {}",
+                    run.binary, run.name, status, backend, version
+                );
+            }
+        }
     }
     if !slices.is_empty() {
         println!("\nSlices:");

@@ -112,6 +112,8 @@ pub struct AnalysisRequest {
     /// Optional architecture hint (e.g., x86_64, arm64, armv7).
     pub arch: Option<String>,
     pub options: AnalysisOptions,
+    /// Optional explicit backend tool path (e.g., configured rizin/ghidra path).
+    pub backend_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Error)]
@@ -175,7 +177,13 @@ impl<'a> RitualRunner<'a> {
             return Err(AnalysisError::MissingBinary(request.binary_path.clone()));
         }
 
-        let result = self.backend.analyze(request)?;
+        let mut result = self.backend.analyze(request)?;
+        if result.backend_path.is_none() {
+            result.backend_path = request.backend_path.as_ref().map(|p| p.display().to_string());
+        }
+        if result.backend_version.is_none() && meta.backend_version.is_some() {
+            result.backend_version = meta.backend_version.clone();
+        }
 
         // Persist a ritual run record in the DB (stub status until we store richer data).
         let now = Utc::now().to_rfc3339();
@@ -185,8 +193,11 @@ impl<'a> RitualRunner<'a> {
             spec_hash: meta.spec_hash.clone(),
             binary_hash: meta.binary_hash.clone(),
             backend: meta.backend.clone(),
-            backend_version: result.backend_version.clone(),
-            backend_path: result.backend_path.clone(),
+            backend_version: result
+                .backend_version
+                .clone()
+                .or_else(|| meta.backend_version.clone()),
+            backend_path: result.backend_path.clone().or_else(|| meta.backend_path.clone()),
             status: meta.status.clone(),
             started_at: now.clone(),
             finished_at: now,
@@ -215,7 +226,7 @@ impl AnalysisBackend for ValidateOnlyBackend {
             call_edges: vec![],
             evidence: vec![],
             basic_blocks: vec![],
-            backend_version: None,
+            backend_version: Some("validate-only".into()),
             backend_path: None,
         })
     }

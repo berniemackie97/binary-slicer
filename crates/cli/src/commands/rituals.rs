@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::canonicalize_or_current;
 use anyhow::{anyhow, Context, Result};
@@ -22,6 +22,13 @@ const DEFAULT_BACKEND_NAME: &str = "validate-only";
 
 fn default_backend_name() -> String {
     DEFAULT_BACKEND_NAME.to_string()
+}
+
+fn default_backend_version(backend: &str) -> Option<String> {
+    match backend {
+        "validate-only" => Some("validate-only".to_string()),
+        _ => None,
+    }
 }
 
 fn resolve_backend_choice(
@@ -50,6 +57,27 @@ fn resolve_backend_choice(
         }
     }
     DEFAULT_BACKEND_NAME.to_string()
+}
+
+fn resolve_backend_path(backend: &str, config: &ritual_core::db::ProjectConfig) -> Option<PathBuf> {
+    match backend {
+        "rizin" => config.backends.rizin.as_ref().map(PathBuf::from),
+        "ghidra" => config.backends.ghidra_headless.as_ref().map(PathBuf::from),
+        _ => None,
+    }
+}
+
+fn resolve_backend_version(
+    backend: &str,
+    config: &ritual_core::db::ProjectConfig,
+) -> Option<String> {
+    match backend {
+        "rizin" => config.backend_versions.rizin.clone(),
+        "ghidra" => config.backend_versions.ghidra_headless.clone(),
+        "capstone" => config.backend_versions.capstone.clone(),
+        other => default_backend_version(other),
+    }
+    .or_else(|| default_backend_version(backend))
 }
 
 fn render_dot(result: &AnalysisResult) -> String {
@@ -144,6 +172,8 @@ pub struct RitualRunInfo {
     pub backend: Option<String>,
     pub backend_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub analysis: Option<AnalysisSummary>,
 }
 
@@ -225,6 +255,7 @@ pub fn db_run_to_info(
         spec_hash: Some(rec.spec_hash.clone()),
         backend: Some(rec.backend.clone()),
         backend_version: rec.backend_version.clone(),
+        backend_path: rec.backend_path.clone(),
         analysis: None,
     }
 }
@@ -303,6 +334,7 @@ pub fn run_ritual_command(
     let backends = default_backend_registry();
     let backend_name =
         resolve_backend_choice(&backends, backend_override, spec.backend.clone(), &config);
+    let backend_path = resolve_backend_path(&backend_name, &config);
     let mut spec_copy = spec;
     if spec_copy.outputs.is_none() {
         spec_copy.outputs = Some(RitualOutputs { reports: true, graphs: true, docs: true });
@@ -330,10 +362,11 @@ pub fn run_ritual_command(
             include_strings: true,
             max_instructions: Some(1024),
         },
+        backend_path: backend_path.clone(),
     };
     let ctx = ritual_core::db::ProjectContext {
         layout: layout.clone(),
-        config,
+        config: config.clone(),
         db_path: db_path.clone(),
         db,
     };
@@ -342,13 +375,17 @@ pub fn run_ritual_command(
         spec_hash: spec_hash.clone(),
         binary_hash: binary_hash.clone(),
         backend: backend_name.clone(),
-        backend_version: None,
-        backend_path: None,
+        backend_version: resolve_backend_version(&backend_name, &config),
+        backend_path: backend_path.as_ref().map(|p| p.display().to_string()),
         status: RitualRunStatus::Stubbed,
     };
     let analysis_result = runner.run(&request, &run_meta)?;
 
     // Write report from analysis result.
+    let backend_version =
+        analysis_result.backend_version.clone().or_else(|| run_meta.backend_version.clone());
+    let backend_path =
+        analysis_result.backend_path.clone().or_else(|| run_meta.backend_path.clone());
     let report_path = run_output_root.join("report.json");
     let report = serde_json::json!({
         "ritual": spec_copy.name,
@@ -357,8 +394,8 @@ pub fn run_ritual_command(
         "max_depth": spec_copy.max_depth,
         "status": run_meta.status.as_str(),
         "backend": backend_name,
-        "backend_version": analysis_result.backend_version.clone(),
-        "backend_path": analysis_result.backend_path.clone(),
+        "backend_version": backend_version.clone(),
+        "backend_path": backend_path.clone(),
         "functions": analysis_result.functions,
         "edges": analysis_result.call_edges,
         "basic_blocks": analysis_result.basic_blocks,
@@ -375,8 +412,8 @@ pub fn run_ritual_command(
         spec_hash,
         binary_hash,
         backend: backend_name,
-        backend_version: analysis_result.backend_version.clone(),
-        backend_path: analysis_result.backend_path.clone(),
+        backend_version,
+        backend_path,
         started_at: now.clone(),
         finished_at: now,
         status: run_meta.status,
@@ -476,6 +513,7 @@ pub fn rerun_ritual_command(
     let backends = default_backend_registry();
     let backend_name =
         resolve_backend_choice(&backends, backend_override, spec.backend.clone(), &config);
+    let backend_path = resolve_backend_path(&backend_name, &config);
     if spec.outputs.is_none() {
         spec.outputs = Some(RitualOutputs { reports: true, graphs: true, docs: true });
     }
@@ -502,10 +540,11 @@ pub fn rerun_ritual_command(
             include_strings: true,
             max_instructions: Some(1024),
         },
+        backend_path: backend_path.clone(),
     };
     let ctx = ritual_core::db::ProjectContext {
         layout: layout.clone(),
-        config,
+        config: config.clone(),
         db_path: db_path.clone(),
         db,
     };
@@ -514,13 +553,17 @@ pub fn rerun_ritual_command(
         spec_hash: spec_hash.clone(),
         binary_hash: binary_hash.clone(),
         backend: backend_name.clone(),
-        backend_version: None,
-        backend_path: None,
+        backend_version: resolve_backend_version(&backend_name, &config),
+        backend_path: backend_path.as_ref().map(|p| p.display().to_string()),
         status: RitualRunStatus::Stubbed,
     };
     let analysis_result = runner.run(&request, &run_meta)?;
 
     // Write report from analysis result.
+    let backend_version =
+        analysis_result.backend_version.clone().or_else(|| run_meta.backend_version.clone());
+    let backend_path =
+        analysis_result.backend_path.clone().or_else(|| run_meta.backend_path.clone());
     let report_path = new_run_root.join("report.json");
     let report = serde_json::json!({
         "ritual": as_name,
@@ -529,8 +572,8 @@ pub fn rerun_ritual_command(
         "max_depth": spec.max_depth,
         "status": run_meta.status.as_str(),
         "backend": backend_name,
-        "backend_version": analysis_result.backend_version.clone(),
-        "backend_path": analysis_result.backend_path.clone(),
+        "backend_version": backend_version.clone(),
+        "backend_path": backend_path.clone(),
         "functions": analysis_result.functions,
         "edges": analysis_result.call_edges,
         "basic_blocks": analysis_result.basic_blocks,
@@ -547,8 +590,8 @@ pub fn rerun_ritual_command(
         spec_hash,
         binary_hash,
         backend: backend_name,
-        backend_version: analysis_result.backend_version.clone(),
-        backend_path: analysis_result.backend_path.clone(),
+        backend_version,
+        backend_path,
         started_at: now.clone(),
         finished_at: now,
         status: RitualRunStatus::Stubbed,
@@ -638,7 +681,21 @@ pub fn list_ritual_runs_command(root: &str, binary_filter: Option<&str>, json: b
 
     println!("Ritual runs:");
     for run in runs {
-        println!("- {} / {} -> {}", run.binary, run.name, run.path);
+        let backend_display = run.backend.as_ref().map(|b| {
+            let version = run.backend_version.as_deref().unwrap_or("(unknown)");
+            if let Some(path) = &run.backend_path {
+                format!(" [backend: {} {} @ {}]", b, version, path)
+            } else {
+                format!(" [backend: {} {}]", b, version)
+            }
+        });
+        println!(
+            "- {} / {} -> {}{}",
+            run.binary,
+            run.name,
+            run.path,
+            backend_display.unwrap_or_default()
+        );
     }
     Ok(())
 }
@@ -690,6 +747,7 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
                     "binary_hash": run.binary_hash,
                     "backend": run.backend,
                     "backend_version": run.backend_version,
+                    "backend_path": run.backend_path,
                     "status": run.status.as_str(),
                     "started_at": run.started_at,
                     "finished_at": run.finished_at,
@@ -728,6 +786,9 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
             if let Some(ver) = run.backend_version {
                 println!("  Backend version: {}", ver);
             }
+            if let Some(path) = run.backend_path {
+                println!("  Backend path: {}", path);
+            }
             println!("  Started:  {}", run.started_at);
             println!("  Finished: {}", run.finished_at);
         }
@@ -740,6 +801,9 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
             println!("  Backend: {}", meta.backend);
             if let Some(ver) = &meta.backend_version {
                 println!("  Backend version: {}", ver);
+            }
+            if let Some(path) = &meta.backend_path {
+                println!("  Backend path: {}", path);
             }
             println!("  Started:  {}", meta.started_at);
             println!("  Finished: {}", meta.finished_at);

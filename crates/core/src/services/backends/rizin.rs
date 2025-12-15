@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Deserialize;
@@ -18,21 +18,19 @@ impl AnalysisBackend for RizinBackend {
             return Err(AnalysisError::MissingBinary(request.binary_path.clone()));
         }
 
-        let rizin_path = resolve_rizin_path();
+        let rizin_path = request.backend_path.clone().unwrap_or_else(resolve_rizin_path);
         let version = version_string(&rizin_path).map_err(AnalysisError::Backend)?;
 
         // Allow tests to feed synthetic JSON via env to avoid needing rizin installed.
-        let (functions, call_edges) =
+        let (functions, call_edges, mut evidence) =
             if let Some(fake_json) = std::env::var_os("BS_RIZIN_FAKE_JSON") {
                 let body = fs::read_to_string(fake_json).map_err(|e| {
                     AnalysisError::Backend(format!("failed to read BS_RIZIN_FAKE_JSON: {e}"))
                 })?;
-                let parsed = parse_functions(&body)?;
-                (parsed.0, parsed.1)
+                parse_functions(&body)?
             } else {
                 let json = run_rizin_json(&rizin_path, &request.binary_path, "aa;aflj")?;
-                let parsed = parse_functions(&json)?;
-                (parsed.0, parsed.1)
+                parse_functions(&json)?
             };
 
         let basic_blocks = if let Some(fake_graph) = std::env::var_os("BS_RIZIN_FAKE_GRAPH") {
@@ -45,11 +43,11 @@ impl AnalysisBackend for RizinBackend {
             parse_basic_blocks(&json)?
         };
 
-        let mut evidence = vec![EvidenceRecord {
+        evidence.push(EvidenceRecord {
             address: 0,
             description: version.clone(),
             kind: Some(crate::services::analysis::EvidenceKind::Other),
-        }];
+        });
 
         // Strings as evidence (optional).
         if request.options.include_strings {
@@ -98,11 +96,7 @@ fn resolve_rizin_path() -> PathBuf {
     std::env::var_os("RIZIN_BIN").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("rizin"))
 }
 
-fn run_rizin_json(
-    rizin_bin: &PathBuf,
-    binary: &PathBuf,
-    command: &str,
-) -> Result<String, AnalysisError> {
+fn run_rizin_json(rizin_bin: &Path, binary: &Path, command: &str) -> Result<String, AnalysisError> {
     let output = Command::new(rizin_bin)
         .args(["-2", "-q0", "-c", command])
         .arg(binary)
@@ -115,12 +109,15 @@ fn run_rizin_json(
     Ok(stdout)
 }
 
-fn parse_functions(body: &str) -> Result<(Vec<FunctionRecord>, Vec<CallEdge>), AnalysisError> {
+fn parse_functions(
+    body: &str,
+) -> Result<(Vec<FunctionRecord>, Vec<CallEdge>, Vec<EvidenceRecord>), AnalysisError> {
     // rizin aflj returns a JSON array; tolerate empty/invalid gracefully.
     let funcs: Vec<RizinFunction> = serde_json::from_str(body)
         .map_err(|e| AnalysisError::Backend(format!("failed to parse rizin JSON: {e}")))?;
     let mut out_funcs = Vec::new();
     let mut edges = Vec::new();
+    let mut evidence = Vec::new();
     for f in funcs {
         let from = f.offset.unwrap_or(0);
         out_funcs.push(FunctionRecord {
@@ -138,21 +135,23 @@ fn parse_functions(body: &str) -> Result<(Vec<FunctionRecord>, Vec<CallEdge>), A
                         to: cref.addr.unwrap_or(0),
                         is_cross_slice: false,
                     });
-                    if let Some(name) = cref.name {
-                        evidence.push(EvidenceRecord {
-                            address: from,
-                            description: format!("call -> {}", name),
-                            kind: Some(crate::services::analysis::EvidenceKind::Call),
-                        });
-                    }
+                    let desc = cref
+                        .name
+                        .map(|name| format!("call -> {}", name))
+                        .unwrap_or_else(|| format!("call -> 0x{:X}", cref.addr.unwrap_or(0)));
+                    evidence.push(EvidenceRecord {
+                        address: from,
+                        description: desc,
+                        kind: Some(crate::services::analysis::EvidenceKind::Call),
+                    });
                 }
             }
         }
     }
-    Ok((out_funcs, edges))
+    Ok((out_funcs, edges, evidence))
 }
 
-fn version_string(rizin_bin: &PathBuf) -> Result<String, String> {
+fn version_string(rizin_bin: &Path) -> Result<String, String> {
     if let Some(fake) = std::env::var_os("BS_RIZIN_FAKE_VERSION") {
         return Ok(fake.to_string_lossy().to_string());
     }

@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
 
@@ -28,6 +29,7 @@ pub fn setup_backend_command(
             validate_executable(&resolved, "rizin")?;
             println!("Found rizin at {}", resolved.display());
             config.backends.rizin = Some(resolved.to_string_lossy().to_string());
+            config.backend_versions.rizin = detect_rizin_version(&resolved);
             maybe_update_path(write_path, resolved.parent());
         }
         "ghidra" => {
@@ -38,6 +40,7 @@ pub fn setup_backend_command(
             validate_executable(&resolved, "analyzeHeadless")?;
             println!("Found analyzeHeadless at {}", resolved.display());
             config.backends.ghidra_headless = Some(resolved.to_string_lossy().to_string());
+            config.backend_versions.ghidra_headless = detect_ghidra_version(&resolved);
             maybe_update_path(write_path, resolved.parent());
         }
         other => return Err(anyhow!("Unsupported backend '{}'", other)),
@@ -153,4 +156,39 @@ fn append_line(path: &Path, line: &str) -> Result<()> {
     let mut file = fs::OpenOptions::new().create(true).append(true).open(path)?;
     writeln!(file, "{}", line)?;
     Ok(())
+}
+
+fn detect_rizin_version(path: &Path) -> Option<String> {
+    Command::new(path).arg("-v").output().ok().and_then(|out| {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        } else {
+            None
+        }
+    })
+}
+
+fn detect_ghidra_version(path: &Path) -> Option<String> {
+    Command::new(path).arg("-version").output().ok().and_then(|out| {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        } else {
+            None
+        }
+    })
 }

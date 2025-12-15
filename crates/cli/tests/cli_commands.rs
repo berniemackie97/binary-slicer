@@ -179,6 +179,8 @@ roots: [start]
         .arg("run-ritual")
         .arg("--root")
         .arg(root)
+        .arg("--backend")
+        .arg("validate-only")
         .arg("--file")
         .arg(&spec_path)
         .assert()
@@ -927,6 +929,13 @@ roots: [entry_point]
     assert!(meta["binary_hash"].as_str().is_some());
     assert!(meta["started_at"].as_str().is_some());
     assert!(meta["finished_at"].as_str().is_some());
+    let backend_val = meta["backend"].as_str().expect("backend string");
+    let version_val = meta["backend_version"].as_str().unwrap_or_default();
+    if backend_val == "validate-only" {
+        assert_eq!(version_val, "validate-only");
+    } else {
+        assert!(!version_val.is_empty(), "expected backend_version for {}", backend_val);
+    }
 
     // Graph artifact should exist (DOT).
     let dot_path = run_root.join("graph.dot");

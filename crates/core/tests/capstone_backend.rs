@@ -29,6 +29,7 @@ fn capstone_backend_disassembles_and_returns_functions() {
             max_instructions: Some(32),
         },
         arch: Some("x86_64".into()),
+        backend_path: None,
     };
 
     let result = backend.analyze(&request).expect("analyze");
@@ -73,6 +74,7 @@ fn capstone_backend_emits_edges_and_block_kinds() {
             ..Default::default()
         },
         arch: Some("x86_64".into()),
+        backend_path: None,
     };
 
     let result = backend.analyze(&request).expect("analyze");
@@ -98,6 +100,7 @@ fn capstone_backend_falls_back_to_roots_when_no_symbols_or_edges() {
             ..Default::default()
         },
         arch: Some("x86_64".into()),
+        backend_path: None,
     };
 
     let result = backend.analyze(&request).expect("analyze empty");
@@ -123,6 +126,7 @@ fn capstone_backend_handles_arm_arch_hint() {
             ..Default::default()
         },
         arch: Some("arm".into()),
+        backend_path: None,
     };
 
     let result = backend.analyze(&request).expect("analyze arm");
@@ -148,6 +152,7 @@ fn capstone_backend_handles_riscv32_arch_hint() {
             ..Default::default()
         },
         arch: Some("riscv32".into()),
+        backend_path: None,
     };
 
     let result = backend.analyze(&request).expect("analyze riscv32");
@@ -173,6 +178,7 @@ fn capstone_backend_handles_arm64_arch_hint() {
             ..Default::default()
         },
         arch: Some("arm64".into()),
+        backend_path: None,
     };
 
     let result = backend.analyze(&request).expect("analyze arm64");
@@ -198,6 +204,7 @@ fn capstone_backend_handles_ppc_arch_hint() {
             ..Default::default()
         },
         arch: Some("ppc64".into()),
+        backend_path: None,
     };
 
     let result = backend.analyze(&request).expect("analyze ppc64");
@@ -223,6 +230,7 @@ fn capstone_backend_marks_indirect_jump_edges() {
             ..Default::default()
         },
         arch: Some("x86_64".into()),
+        backend_path: None,
     };
 
     let result = backend.analyze(&request).expect("analyze ijump");
@@ -264,6 +272,7 @@ fn capstone_backend_auto_detects_arch_and_sections() {
             ..Default::default()
         },
         arch: None, // force object-based detection
+        backend_path: None,
     };
 
     let result = backend.analyze(&request).expect("analyze auto-detect");
@@ -292,6 +301,7 @@ fn capstone_backend_falls_back_on_unknown_arch_hint() {
             ..Default::default()
         },
         arch: Some("totally-unknown".into()),
+        backend_path: None,
     };
 
     let result = backend.analyze(&request).expect("analyze unknown arch");
@@ -320,6 +330,7 @@ fn capstone_backend_handles_empty_bytes_with_detected_arch() {
             ..Default::default()
         },
         arch: None,
+        backend_path: None,
     };
 
     // Should not error even if nothing is disassembled.
@@ -345,6 +356,7 @@ fn capstone_backend_decodes_arm64_calls() {
             ..Default::default()
         },
         arch: Some("arm64".into()),
+        backend_path: None,
     };
 
     let result = backend.analyze(&request).expect("analyze arm64 call");
@@ -374,6 +386,7 @@ fn capstone_backend_decodes_riscv_jal_call() {
             ..Default::default()
         },
         arch: Some("riscv32".into()),
+        backend_path: None,
     };
 
     let result = backend.analyze(&request).expect("analyze riscv jal");
@@ -418,6 +431,7 @@ fn capstone_backend_auto_detects_macho_arch_none() {
             ..Default::default()
         },
         arch: None, // force Mach-O detection path
+        backend_path: None,
     };
 
     let result = backend.analyze(&request).expect("analyze macho none");

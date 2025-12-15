@@ -35,6 +35,9 @@ pub struct ProjectConfig {
     /// Optional per-backend tool paths.
     #[serde(default, skip_serializing_if = "BackendPaths::is_empty")]
     pub backends: BackendPaths,
+    /// Optional per-backend tool versions (best-effort detection).
+    #[serde(default, skip_serializing_if = "BackendVersions::is_empty")]
+    pub backend_versions: BackendVersions,
 }
 
 impl ProjectConfig {
@@ -47,6 +50,7 @@ impl ProjectConfig {
             db: DbConfig::new(db_path),
             default_backend: None,
             backends: BackendPaths::default(),
+            backend_versions: BackendVersions::default(),
         }
     }
 }
@@ -63,5 +67,22 @@ pub struct BackendPaths {
 impl BackendPaths {
     pub fn is_empty(&self) -> bool {
         self.rizin.is_none() && self.ghidra_headless.is_none()
+    }
+}
+
+/// Optional tool versions for analysis backends.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BackendVersions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rizin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ghidra_headless: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capstone: Option<String>,
+}
+
+impl BackendVersions {
+    pub fn is_empty(&self) -> bool {
+        self.rizin.is_none() && self.ghidra_headless.is_none() && self.capstone.is_none()
     }
 }

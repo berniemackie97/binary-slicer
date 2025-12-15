@@ -76,6 +76,8 @@ fn show_ritual_run_json_includes_persisted_analysis_counts() {
 
     let payload: Value =
         serde_json::from_slice(&output).expect("show-ritual-run output should be JSON");
+    let meta = payload.get("metadata").expect("metadata section missing");
+    assert_eq!(meta["backend_path"], "/usr/bin/rizin");
     let analysis_json = payload.get("analysis").expect("analysis section missing");
     assert_eq!(analysis_json["functions"].as_array().unwrap().len(), 1);
     assert_eq!(analysis_json["call_edges"].as_array().unwrap().len(), 1);
@@ -164,6 +166,7 @@ fn project_info_json_includes_analysis_summary() {
     assert_eq!(summary["call_edges"].as_u64().unwrap(), 1);
     assert_eq!(summary["basic_blocks"].as_u64().unwrap(), 1);
     assert_eq!(summary["evidence"].as_u64().unwrap(), 1);
+    assert_eq!(summary["backend_path"], "/usr/bin/rizin");
 }
 
 #[test]
@@ -223,4 +226,5 @@ fn list_ritual_runs_json_includes_analysis_summary() {
     let analysis_json = runs[0].get("analysis").expect("analysis missing");
     assert_eq!(analysis_json["functions"].as_u64().unwrap(), 1);
     assert_eq!(analysis_json["call_edges"].as_u64().unwrap(), 1);
+    assert_eq!(analysis_json["backend_path"], "/usr/bin/rizin");
 }

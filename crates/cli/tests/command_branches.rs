@@ -1,3 +1,4 @@
+use assert_cmd::cargo::cargo_bin_cmd;
 use binary_slicer::commands::{
     add_binary_command, init_project_command, init_slice_command, project_info_command,
     show_ritual_run_command,
@@ -24,9 +25,35 @@ fn project_info_reports_binaries_and_slices() {
     )
     .unwrap();
     init_slice_command(&root, "SliceA", Some("Test slice".into()), None).unwrap();
+    let layout = ritual_core::db::ProjectLayout::new(&root);
+    let db = ritual_core::db::ProjectDb::open(&layout.db_path).unwrap();
+    let run = ritual_core::db::RitualRunRecord {
+        binary: "BinA".into(),
+        ritual: "SliceA".into(),
+        spec_hash: "sh".into(),
+        binary_hash: None,
+        backend: "rizin".into(),
+        backend_version: Some("rz-1.0".into()),
+        backend_path: Some("/usr/bin/rizin".into()),
+        status: ritual_core::db::RitualRunStatus::Succeeded,
+        started_at: "t0".into(),
+        finished_at: "t1".into(),
+    };
+    db.insert_ritual_run(&run).unwrap();
 
-    // Human mode should print without errors.
-    project_info_command(&root, false).unwrap();
+    // Human mode via CLI should print backend info for the run.
+    let human_out = cargo_bin_cmd!("binary-slicer")
+        .arg("project-info")
+        .arg("--root")
+        .arg(&root)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let human = String::from_utf8_lossy(&human_out);
+    assert!(human.contains("backend: rizin"));
+    assert!(human.contains("/usr/bin/rizin"));
     // JSON mode should include the entries.
     project_info_command(&root, true).unwrap();
 }

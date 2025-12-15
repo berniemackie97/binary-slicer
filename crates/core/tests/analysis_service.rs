@@ -49,6 +49,61 @@ fn backend_registry_registers_and_resolves() {
 }
 
 #[test]
+fn ritual_runner_persists_meta_backend_path_when_backend_omits_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let layout = ritual_core::db::ProjectLayout::new(temp.path());
+    std::fs::create_dir_all(&layout.meta_dir).unwrap();
+    let config =
+        ritual_core::db::ProjectConfig::new("CtxService", layout.db_path_relative_string());
+    std::fs::write(&layout.project_config_path, serde_json::to_string_pretty(&config).unwrap())
+        .unwrap();
+    let ctx = ProjectContext::from_root(temp.path()).expect("ctx");
+    let mut registry = BackendRegistry::new();
+    registry.register(NoopBackend);
+    let backend = registry.get("noop").unwrap();
+
+    // Create a dummy binary file so the runner sees it on disk.
+    let bin_path = temp.path().join("bin.so");
+    std::fs::write(&bin_path, b"bin").unwrap();
+
+    let request = AnalysisRequest {
+        ritual_name: "TestRitual".into(),
+        binary_name: "Bin".into(),
+        binary_path: bin_path.clone(),
+        roots: vec!["entry_point".into()],
+        options: AnalysisOptions {
+            max_depth: Some(1),
+            include_imports: false,
+            include_strings: false,
+            max_instructions: Some(16),
+        },
+        arch: None,
+        backend_path: Some(std::path::PathBuf::from("/configured/tool")),
+    };
+
+    let runner = RitualRunner { ctx: &ctx, backend };
+    let result = runner
+        .run(
+            &request,
+            &RunMetadata {
+                spec_hash: "hash123".into(),
+                binary_hash: Some("binhash".into()),
+                backend: "noop".into(),
+                backend_version: None,
+                backend_path: Some("/configured/tool".into()),
+                status: ritual_core::db::RitualRunStatus::Succeeded,
+            },
+        )
+        .expect("analysis");
+    assert_eq!(result.backend_path.as_deref(), Some("/configured/tool"));
+
+    // DB should contain a run record carrying the configured backend path.
+    let runs = ctx.db.list_ritual_runs(None).expect("runs");
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].backend_path.as_deref(), Some("/configured/tool"));
+}
+
+#[test]
 fn ritual_runner_invokes_backend_and_inserts_run() {
     let temp = tempfile::tempdir().unwrap();
     let layout = ritual_core::db::ProjectLayout::new(temp.path());
@@ -78,6 +133,7 @@ fn ritual_runner_invokes_backend_and_inserts_run() {
             max_instructions: Some(16),
         },
         arch: None,
+        backend_path: None,
     };
 
     let runner = RitualRunner { ctx: &ctx, backend };

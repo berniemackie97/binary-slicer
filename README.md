@@ -129,7 +129,8 @@ Slice docs live at `docs/slices/<Name>.md` and are meant to be edited by humans 
 - `capstone-backend`: enables a Capstone-based backend (symbol-aware disassembly with basic blocks + call-edge extraction; ELF/PE/Mach-O section mapping) and makes it available via `--backend capstone`.
 - `rizin-backend`: rizin-backed analyzer (prefers `RIZIN_BIN` env, otherwise `rizin`) that shells out headless to discover functions/metadata. In CI or offline tests you can set `BS_RIZIN_FAKE_JSON` / `BS_RIZIN_FAKE_GRAPH` / `BS_RIZIN_FAKE_STRINGS` and `BS_RIZIN_FAKE_VERSION` to avoid needing rizin installed.
 - `ghidra-backend`: registers a Ghidra headless stub (requires `GHIDRA_ANALYZE_HEADLESS` pointing to `analyzeHeadless` or `GHIDRA_INSTALL_DIR`); Ghidra version is recorded as evidence.
-- `setup-backend` can record tool paths in `.ritual/project.json` (and set `default_backend`), and optionally append the tool directory to your shell profile PATH (`--write-path`). It never installs software silently.
+- `setup-backend` can record tool paths in `.ritual/project.json` (and set `default_backend`), optionally append the tool directory to your shell profile PATH (`--write-path`), and best-effort detect the tool version to store alongside the path. It never installs software silently.
+- Recorded backend paths are preferred when running rituals and are captured in run metadata as `backend_path` (and `backend_version` when available).
 
 ## Project layout
 
