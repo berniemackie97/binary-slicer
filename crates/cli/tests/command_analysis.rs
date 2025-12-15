@@ -50,6 +50,7 @@ fn show_ritual_run_json_includes_persisted_analysis_counts() {
             description: "test-evidence".into(),
             kind: None,
         }],
+        roots: vec!["entry_point".into()],
         backend_version: Some("rz-1.0".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };
@@ -139,6 +140,7 @@ fn project_info_json_includes_analysis_summary() {
             description: "evidence".into(),
             kind: None,
         }],
+        roots: vec!["entry_point".into()],
         backend_version: Some("rz-1.0".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };
@@ -205,6 +207,7 @@ fn list_ritual_runs_json_includes_analysis_summary() {
             successors: vec![BlockEdge { target: 0x4000, kind: BlockEdgeKind::Jump }],
         }],
         evidence: vec![EvidenceRecord { address: 0x3000, description: "list".into(), kind: None }],
+        roots: vec!["entry_point".into()],
         backend_version: Some("rz-1.0".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };

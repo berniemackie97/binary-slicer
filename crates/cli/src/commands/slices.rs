@@ -3,8 +3,10 @@ use std::fs;
 use crate::canonicalize_or_current;
 use anyhow::{Context, Result};
 use ritual_core::db::{RitualRunRecord, SliceRecord};
-use ritual_core::services::analysis::{AnalysisResult, BlockEdgeKind};
+use ritual_core::services::analysis::{AnalysisResult, BlockEdgeKind, EvidenceKind};
 use serde_json;
+use serde_yaml;
+use std::path::Path;
 
 /// Initialize a new slice record and its documentation scaffold.
 pub fn init_slice_command(
@@ -178,14 +180,47 @@ pub fn emit_slice_docs_command(root: &str) -> Result<()> {
         if let Some(bin) = &slice.default_binary {
             contents.push_str(&format!("**Default binary:** {}\n\n", bin));
         }
-        contents.push_str(
-            "## Roots\n- TODO: list root functions (by address/name) that define this slice.\n\n",
-        );
         // Pull analysis (latest matching run) to populate functions/evidence if available.
         let latest_run = latest_run_for_slice(&slice, None, &runs);
         let analysis = latest_run
             .and_then(|run| db.load_analysis_result(&run.binary, &run.ritual).ok())
             .flatten();
+        if let Some(run) = latest_run {
+            let roots = analysis
+                .as_ref()
+                .map(|a| a.roots.clone())
+                .filter(|r| !r.is_empty())
+                .unwrap_or_else(|| load_roots_for_run(&layout, run));
+            let backend_version = analysis
+                .as_ref()
+                .and_then(|a| a.backend_version.clone())
+                .or(run.backend_version.clone());
+            let backend_path =
+                analysis.as_ref().and_then(|a| a.backend_path.clone()).or(run.backend_path.clone());
+            contents.push_str("**Backend:** ");
+            contents.push_str(&run.backend);
+            if let Some(v) = backend_version {
+                contents.push_str(&format!(" {}", v));
+            }
+            if let Some(p) = backend_path {
+                contents.push_str(&format!(" @ {}", p));
+            }
+            contents.push_str("\n\n");
+
+            contents.push_str("## Roots\n");
+            if roots.is_empty() {
+                contents.push_str("- (no roots recorded)\n\n");
+            } else {
+                for r in &roots {
+                    contents.push_str(&format!("- {}\n", r));
+                }
+                contents.push('\n');
+            }
+        } else {
+            contents.push_str(
+                "## Roots\n- TODO: list root functions (by address/name) that define this slice.\n\n",
+            );
+        }
         contents.push_str("## Functions\n");
         if let Some(a) = &analysis {
             if a.functions.is_empty() {
@@ -206,8 +241,30 @@ pub fn emit_slice_docs_command(root: &str) -> Result<()> {
             if a.evidence.is_empty() {
                 contents.push_str("- (no evidence recorded)\n");
             } else {
-                for e in &a.evidence {
-                    contents.push_str(&format!("- 0x{:X}: {}\n", e.address, e.description));
+                let categorized = categorize_evidence(&a.evidence);
+                if !categorized.strings.is_empty() {
+                    contents.push_str("### Strings\n");
+                    for e in &categorized.strings {
+                        contents.push_str(&format!("- 0x{:X}: {}\n", e.address, e.description));
+                    }
+                }
+                if !categorized.imports.is_empty() {
+                    contents.push_str("### Imports\n");
+                    for e in &categorized.imports {
+                        contents.push_str(&format!("- 0x{:X}: {}\n", e.address, e.description));
+                    }
+                }
+                if !categorized.calls.is_empty() {
+                    contents.push_str("### Calls\n");
+                    for e in &categorized.calls {
+                        contents.push_str(&format!("- 0x{:X}: {}\n", e.address, e.description));
+                    }
+                }
+                if !categorized.other.is_empty() {
+                    contents.push_str("### Other evidence\n");
+                    for e in &categorized.other {
+                        contents.push_str(&format!("- 0x{:X}: {}\n", e.address, e.description));
+                    }
                 }
             }
         } else {
@@ -271,37 +328,54 @@ pub fn emit_slice_reports_command(root: &str, preferred_binary: Option<&str>) ->
         let analysis = latest_run
             .and_then(|run| db.load_analysis_result(&run.binary, &run.ritual).ok())
             .flatten();
+        let roots = analysis
+            .as_ref()
+            .map(|a| a.roots.clone())
+            .filter(|r| !r.is_empty())
+            .or_else(|| latest_run.map(|run| load_roots_for_run(&layout, run)))
+            .unwrap_or_default();
 
-        let (functions, call_edges, evidence, basic_blocks, backend_version, backend_path) =
-            if let Some(a) = &analysis {
-                (
-                    serde_json::to_value(&a.functions)?,
-                    serde_json::to_value(&a.call_edges)?,
-                    serde_json::to_value(&a.evidence)?,
-                    serde_json::to_value(&a.basic_blocks)?,
-                    a.backend_version.clone(),
-                    a.backend_path.clone(),
-                )
-            } else {
-                (
-                    serde_json::json!([]),
-                    serde_json::json!([]),
-                    serde_json::json!([]),
-                    serde_json::json!([]),
-                    None,
-                    None,
-                )
-            };
+        let (functions, call_edges, evidence, basic_blocks) = if let Some(a) = &analysis {
+            (
+                serde_json::to_value(&a.functions)?,
+                serde_json::to_value(&a.call_edges)?,
+                serde_json::to_value(&a.evidence)?,
+                serde_json::to_value(&a.basic_blocks)?,
+            )
+        } else {
+            (
+                serde_json::json!([]),
+                serde_json::json!([]),
+                serde_json::json!([]),
+                serde_json::json!([]),
+            )
+        };
+        let backend = latest_run.map(|r| r.backend.clone());
+        let backend_version = analysis
+            .as_ref()
+            .and_then(|a| a.backend_version.clone())
+            .or_else(|| latest_run.and_then(|r| r.backend_version.clone()));
+        let backend_path = analysis
+            .as_ref()
+            .and_then(|a| a.backend_path.clone())
+            .or_else(|| latest_run.and_then(|r| r.backend_path.clone()));
+        let categorized = analysis.as_ref().map(|a| categorize_evidence(&a.evidence));
 
         let report = serde_json::json!({
             "name": slice.name,
             "description": slice.description,
             "status": format!("{:?}", slice.status),
-            "roots": [],
+            "roots": roots,
             "functions": functions,
             "call_edges": call_edges,
             "basic_blocks": basic_blocks,
             "evidence": evidence,
+            "evidence_counts": categorized.as_ref().map(|c| c.counts()),
+            "strings": categorized.as_ref().map(|c| c.strings.clone()).unwrap_or_default(),
+            "imports": categorized.as_ref().map(|c| c.imports.clone()).unwrap_or_default(),
+            "calls": categorized.as_ref().map(|c| c.calls.clone()).unwrap_or_default(),
+            "other_evidence": categorized.as_ref().map(|c| c.other.clone()).unwrap_or_default(),
+            "backend": backend,
             "backend_version": backend_version,
             "backend_path": backend_path,
         });
@@ -311,7 +385,7 @@ pub fn emit_slice_reports_command(root: &str, preferred_binary: Option<&str>) ->
         })?;
         println!("Emitted slice report: {}", report_path.display());
 
-        let dot = render_dot_from_analysis(analysis.as_ref());
+        let dot = render_dot_from_analysis(analysis.as_ref(), backend, backend_version.as_deref());
         fs::write(&graph_path, dot)
             .with_context(|| format!("Failed to write slice graph at {}", graph_path.display()))?;
         println!("Emitted slice graph: {}", graph_path.display());
@@ -320,8 +394,20 @@ pub fn emit_slice_reports_command(root: &str, preferred_binary: Option<&str>) ->
     Ok(())
 }
 
-fn render_dot_from_analysis(analysis: Option<&AnalysisResult>) -> String {
+fn render_dot_from_analysis(
+    analysis: Option<&AnalysisResult>,
+    backend: Option<String>,
+    backend_version: Option<&str>,
+) -> String {
     let mut out = String::from("digraph Slice {\n  rankdir=LR;\n");
+    if let Some(b) = backend {
+        let mut label = format!("backend: {}", b);
+        if let Some(v) = backend_version {
+            label.push_str(&format!(" {}", v));
+        }
+        let safe_label = label.replace('"', "\\\"");
+        out.push_str(&format!("  label=\"{}\";\n  labelloc=top;\n", safe_label));
+    }
     if let Some(result) = analysis {
         for func in &result.functions {
             let label = func.name.clone().unwrap_or_else(|| format!("0x{:X}", func.address));
@@ -381,4 +467,93 @@ fn latest_run_for_slice<'a>(
             .filter(|r| r.ritual == slice.name)
             .max_by(|a, b| a.finished_at.cmp(&b.finished_at).then(a.started_at.cmp(&b.started_at)))
     }
+}
+
+fn load_roots_for_run(
+    layout: &ritual_core::db::ProjectLayout,
+    run: &RitualRunRecord,
+) -> Vec<String> {
+    let run_dir = layout.binary_output_root(&run.binary).join(&run.ritual);
+    let spec_path = run_dir.join("spec.yaml");
+    if !spec_path.is_file() {
+        return Vec::new();
+    }
+    parse_roots_from_spec(&spec_path).unwrap_or_default()
+}
+
+fn parse_roots_from_spec(path: &Path) -> Option<Vec<String>> {
+    let body = std::fs::read_to_string(path).ok()?;
+    let mut roots: Option<Vec<String>> = serde_yaml::from_str::<serde_yaml::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("roots").cloned())
+        .and_then(value_to_strings);
+    if roots.is_none() {
+        roots = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v.get("roots").cloned())
+            .and_then(json_value_to_strings);
+    }
+    roots
+}
+
+fn value_to_strings(value: serde_yaml::Value) -> Option<Vec<String>> {
+    let seq = value.as_sequence()?;
+    let mut out = Vec::new();
+    for item in seq {
+        if let Some(s) = item.as_str() {
+            out.push(s.to_string());
+        }
+    }
+    Some(out)
+}
+
+fn json_value_to_strings(value: serde_json::Value) -> Option<Vec<String>> {
+    let seq = value.as_array()?;
+    let mut out = Vec::new();
+    for item in seq {
+        if let Some(s) = item.as_str() {
+            out.push(s.to_string());
+        }
+    }
+    Some(out)
+}
+
+#[derive(Clone)]
+struct EvidenceBuckets {
+    strings: Vec<ritual_core::services::analysis::EvidenceRecord>,
+    imports: Vec<ritual_core::services::analysis::EvidenceRecord>,
+    calls: Vec<ritual_core::services::analysis::EvidenceRecord>,
+    other: Vec<ritual_core::services::analysis::EvidenceRecord>,
+}
+
+impl EvidenceBuckets {
+    fn counts(&self) -> serde_json::Value {
+        serde_json::json!({
+            "total": self.strings.len() + self.imports.len() + self.calls.len() + self.other.len(),
+            "strings": self.strings.len(),
+            "imports": self.imports.len(),
+            "calls": self.calls.len(),
+            "other": self.other.len(),
+        })
+    }
+}
+
+fn categorize_evidence(
+    evidence: &[ritual_core::services::analysis::EvidenceRecord],
+) -> EvidenceBuckets {
+    let mut buckets = EvidenceBuckets {
+        strings: Vec::new(),
+        imports: Vec::new(),
+        calls: Vec::new(),
+        other: Vec::new(),
+    };
+    for e in evidence {
+        match e.kind {
+            Some(EvidenceKind::String) => buckets.strings.push(e.clone()),
+            Some(EvidenceKind::Import) => buckets.imports.push(e.clone()),
+            Some(EvidenceKind::Call) => buckets.calls.push(e.clone()),
+            _ => buckets.other.push(e.clone()),
+        }
+    }
+    buckets
 }

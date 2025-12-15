@@ -42,6 +42,7 @@ fn analysis_result_is_persisted_with_run() {
             len: 4,
             successors: vec![BlockEdge { target: 0x1004, kind: BlockEdgeKind::Fallthrough }],
         }],
+        roots: vec!["root_a".into(), "root_b".into()],
         backend_version: Some("1.0".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };
@@ -54,6 +55,7 @@ fn analysis_result_is_persisted_with_run() {
     assert_eq!(loaded.call_edges.len(), 1);
     assert_eq!(loaded.basic_blocks.len(), 1);
     assert_eq!(loaded.evidence.len(), 1);
+    assert_eq!(loaded.roots, vec!["root_a".to_string(), "root_b".to_string()]);
 
     // Spot-check that data was written.
     let func_count: i64 = db
@@ -87,4 +89,12 @@ fn analysis_result_is_persisted_with_run() {
         })
         .unwrap();
     assert_eq!(evidence_count, 1);
+
+    let roots_count: i64 = db
+        .connection()
+        .query_row("SELECT COUNT(*) FROM analysis_roots WHERE run_id = ?", [run_id], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(roots_count, 2);
 }

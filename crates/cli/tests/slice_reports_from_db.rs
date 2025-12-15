@@ -52,6 +52,7 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
             description: "import foo".into(),
             kind: Some(EvidenceKind::Import),
         }],
+        roots: vec!["root_a".into()],
         backend_version: Some("rz-1.0".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };
@@ -90,6 +91,7 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
             description: "newer import".into(),
             kind: Some(EvidenceKind::Import),
         }],
+        roots: vec!["root_a".into(), "root_b".into()],
         backend_version: Some("rz-2.0".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };
@@ -128,6 +130,7 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
             description: "binb call".into(),
             kind: Some(EvidenceKind::Call),
         }],
+        roots: vec!["root_b".into()],
         backend_version: Some("rz-2.1".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };
@@ -145,6 +148,9 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
     let funcs = report["functions"].as_array().unwrap();
     assert_eq!(funcs.len(), 1);
     assert_eq!(funcs[0]["name"].as_str().unwrap(), "NewerFunc");
+    assert_eq!(report["backend"], "rizin");
+    assert_eq!(report["backend_version"], "rz-2.0");
+    assert_eq!(report["backend_path"], "/usr/bin/rizin");
     assert_eq!(report["call_edges"].as_array().unwrap().len(), 1);
     let ev = report["evidence"].as_array().unwrap();
     assert!(!ev.is_empty());
@@ -163,6 +169,7 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
         serde_json::from_str(&std::fs::read_to_string(&report_path).unwrap()).unwrap();
     let funcs_override = report_override["functions"].as_array().unwrap();
     assert_eq!(funcs_override[0]["name"].as_str().unwrap(), "BinBFunc");
+    assert_eq!(report_override["backend_version"], "rz-2.1");
 
     // Docs should include evidence/functions from the chosen run.
     emit_slice_docs_command(&root).unwrap();
@@ -170,4 +177,5 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
     assert!(doc_body.contains("BinA")); // default binary printed
     assert!(doc_body.contains("NewerFunc")); // uses default binary (BinA) run by default
     assert!(doc_body.contains("Evidence")); // evidence section populated
+    assert!(doc_body.contains("Backend:** rizin"));
 }

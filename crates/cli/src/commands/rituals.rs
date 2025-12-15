@@ -80,8 +80,27 @@ fn resolve_backend_version(
     .or_else(|| default_backend_version(backend))
 }
 
-fn render_dot(result: &AnalysisResult) -> String {
+fn format_backend_label(
+    backend: &str,
+    backend_version: Option<&str>,
+    backend_path: Option<&str>,
+) -> String {
+    let mut label = format!("backend: {}", backend);
+    if let Some(v) = backend_version {
+        label.push_str(&format!(" {}", v));
+    }
+    if let Some(p) = backend_path {
+        label.push_str(&format!(" @ {}", p));
+    }
+    label
+}
+
+fn render_dot(result: &AnalysisResult, backend_label: Option<&str>) -> String {
     let mut out = String::from("digraph G {\n  rankdir=LR;\n");
+    if let Some(label) = backend_label {
+        let safe_label = label.replace('"', "\\\"");
+        out.push_str(&format!("  label=\"{}\";\n  labelloc=top;\n", safe_label));
+    }
     if result.functions.is_empty() && result.call_edges.is_empty() && result.basic_blocks.is_empty()
     {
         out.push_str("  // no graph data available\n}\n");
@@ -386,6 +405,8 @@ pub fn run_ritual_command(
         analysis_result.backend_version.clone().or_else(|| run_meta.backend_version.clone());
     let backend_path =
         analysis_result.backend_path.clone().or_else(|| run_meta.backend_path.clone());
+    let backend_label =
+        format_backend_label(&backend_name, backend_version.as_deref(), backend_path.as_deref());
     let report_path = run_output_root.join("report.json");
     let report = serde_json::json!({
         "ritual": spec_copy.name,
@@ -393,7 +414,7 @@ pub fn run_ritual_command(
         "roots": spec_copy.roots,
         "max_depth": spec_copy.max_depth,
         "status": run_meta.status.as_str(),
-        "backend": backend_name,
+        "backend": backend_name.clone(),
         "backend_version": backend_version.clone(),
         "backend_path": backend_path.clone(),
         "functions": analysis_result.functions,
@@ -423,7 +444,7 @@ pub fn run_ritual_command(
         .with_context(|| format!("Failed to write run metadata at {}", metadata_path.display()))?;
 
     // Write graph DOT (best-effort even if sparse).
-    let dot = render_dot(&analysis_result);
+    let dot = render_dot(&analysis_result, Some(&backend_label));
     let dot_path = run_output_root.join("graph.dot");
     fs::write(&dot_path, dot)
         .with_context(|| format!("Failed to write ritual graph at {}", dot_path.display()))?;
@@ -564,6 +585,8 @@ pub fn rerun_ritual_command(
         analysis_result.backend_version.clone().or_else(|| run_meta.backend_version.clone());
     let backend_path =
         analysis_result.backend_path.clone().or_else(|| run_meta.backend_path.clone());
+    let backend_label =
+        format_backend_label(&backend_name, backend_version.as_deref(), backend_path.as_deref());
     let report_path = new_run_root.join("report.json");
     let report = serde_json::json!({
         "ritual": as_name,
@@ -571,7 +594,7 @@ pub fn rerun_ritual_command(
         "roots": spec.roots,
         "max_depth": spec.max_depth,
         "status": run_meta.status.as_str(),
-        "backend": backend_name,
+        "backend": backend_name.clone(),
         "backend_version": backend_version.clone(),
         "backend_path": backend_path.clone(),
         "functions": analysis_result.functions,
@@ -600,7 +623,7 @@ pub fn rerun_ritual_command(
     fs::write(&metadata_path, serde_json::to_string_pretty(&metadata)?)
         .with_context(|| format!("Failed to write run metadata at {}", metadata_path.display()))?;
 
-    let dot = render_dot(&analysis_result);
+    let dot = render_dot(&analysis_result, Some(&backend_label));
     let dot_path = new_run_root.join("graph.dot");
     fs::write(&dot_path, dot)
         .with_context(|| format!("Failed to write ritual graph at {}", dot_path.display()))?;
@@ -816,6 +839,27 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
         println!("    Call edges: {}", analysis.call_edges.len());
         println!("    Basic blocks: {}", analysis.basic_blocks.len());
         println!("    Evidence: {}", analysis.evidence.len());
+        if !analysis.roots.is_empty() {
+            println!("    Roots: {:?}", analysis.roots);
+        }
+        let mut strings = 0;
+        let mut imports = 0;
+        let mut calls = 0;
+        let mut other = 0;
+        for e in &analysis.evidence {
+            match e.kind {
+                Some(ritual_core::services::analysis::EvidenceKind::String) => strings += 1,
+                Some(ritual_core::services::analysis::EvidenceKind::Import) => imports += 1,
+                Some(ritual_core::services::analysis::EvidenceKind::Call) => calls += 1,
+                _ => other += 1,
+            }
+        }
+        if strings + imports + calls + other > 0 {
+            println!(
+                "    Evidence breakdown: strings={} imports={} calls={} other={}",
+                strings, imports, calls, other
+            );
+        }
     }
 
     Ok(())

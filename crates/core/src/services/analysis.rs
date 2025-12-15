@@ -77,6 +77,7 @@ pub struct AnalysisResult {
     pub call_edges: Vec<CallEdge>,
     pub evidence: Vec<EvidenceRecord>,
     pub basic_blocks: Vec<BasicBlock>,
+    pub roots: Vec<String>,
     pub backend_version: Option<String>,
     pub backend_path: Option<String>,
 }
@@ -226,6 +227,7 @@ impl AnalysisBackend for ValidateOnlyBackend {
             call_edges: vec![],
             evidence: vec![],
             basic_blocks: vec![],
+            roots: request.roots.clone(),
             backend_version: Some("validate-only".into()),
             backend_path: None,
         })

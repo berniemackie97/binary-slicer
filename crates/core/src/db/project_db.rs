@@ -11,7 +11,7 @@ use crate::db::{BinaryRecord, RitualRunRecord, RitualRunStatus, SliceRecord, Sli
 const MIN_SUPPORTED_SCHEMA_VERSION: i32 = 0;
 
 /// Latest schema version this crate knows about.
-pub const CURRENT_SCHEMA_VERSION: i32 = 7;
+pub const CURRENT_SCHEMA_VERSION: i32 = 8;
 
 /// Error type for project database operations.
 #[derive(Debug, Error)]
@@ -229,6 +229,18 @@ impl ProjectDb {
             }
         }
 
+        {
+            let mut stmt = tx.prepare(
+                r#"
+                INSERT OR REPLACE INTO analysis_roots (run_id, idx, root)
+                VALUES (?1, ?2, ?3)
+                "#,
+            )?;
+            for (idx, root) in result.roots.iter().enumerate() {
+                stmt.execute(params![run_id, idx as i64, root])?;
+            }
+        }
+
         tx.commit()?;
         Ok(())
     }
@@ -371,13 +383,36 @@ impl ProjectDb {
             }
         }
 
+        // Roots
+        let mut roots = Vec::new();
+        {
+            let mut stmt = self.conn.prepare(
+                r#"
+                SELECT root FROM analysis_roots
+                WHERE run_id = ?1
+                ORDER BY idx
+                "#,
+            )?;
+            let rows = stmt.query_map(params![run_id], |row| row.get::<_, String>(0))?;
+            for r in rows {
+                roots.push(r?);
+            }
+        }
+
+        let (backend_version, backend_path) = self.conn.query_row(
+            "SELECT backend_version, backend_path FROM ritual_runs WHERE id = ?1",
+            params![run_id],
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
+        )?;
+
         Ok(Some(crate::services::analysis::AnalysisResult {
             functions,
             call_edges,
             evidence,
             basic_blocks,
-            backend_version: None,
-            backend_path: None,
+            roots,
+            backend_version,
+            backend_path,
         }))
     }
     /// List ritual runs, optionally filtered by binary name.
@@ -476,6 +511,9 @@ impl ProjectDb {
 /// - 3: add backend column to ritual_runs
 /// - 4: add backend_version, backend_path to ritual_runs
 /// - 5: add analysis tables (functions, call edges, basic blocks, evidence)
+/// - 6: add default_binary column to slices (guarded in code)
+/// - 7: add evidence kind column
+/// - 8: add analysis_roots table for persisted roots per run
 fn apply_migrations(conn: &Connection) -> DbResult<()> {
     let mut current_version = current_schema_version(conn)?;
 
@@ -628,6 +666,22 @@ fn apply_migrations(conn: &Connection) -> DbResult<()> {
             conn.execute("ALTER TABLE analysis_evidence ADD COLUMN kind TEXT;", [])?;
         }
         conn.execute("PRAGMA user_version = 7;", [])?;
+    }
+
+    if current_version < 8 {
+        conn.execute_batch(
+            r#"
+            BEGIN;
+            CREATE TABLE IF NOT EXISTS analysis_roots (
+                run_id INTEGER NOT NULL,
+                idx    INTEGER NOT NULL,
+                root   TEXT NOT NULL,
+                PRIMARY KEY(run_id, idx)
+            );
+            PRAGMA user_version = 8;
+            COMMIT;
+            "#,
+        )?;
     }
 
     Ok(())

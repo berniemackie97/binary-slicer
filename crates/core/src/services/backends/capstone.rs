@@ -496,6 +496,7 @@ impl AnalysisBackend for CapstoneBackend {
                 call_edges: vec![],
                 evidence: vec![],
                 basic_blocks: vec![],
+                roots: request.roots.clone(),
                 backend_version,
                 backend_path: None,
             });
@@ -775,6 +776,7 @@ impl AnalysisBackend for CapstoneBackend {
             call_edges,
             evidence,
             basic_blocks,
+            roots: request.roots.clone(),
             backend_version,
             backend_path: None,
         })

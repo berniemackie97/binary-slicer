@@ -82,6 +82,7 @@ impl AnalysisBackend for RizinBackend {
             call_edges,
             evidence,
             basic_blocks,
+            roots: request.roots.clone(),
             backend_version: Some(version),
             backend_path: Some(rizin_path.display().to_string()),
         })

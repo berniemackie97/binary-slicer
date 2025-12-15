@@ -31,6 +31,7 @@ impl AnalysisBackend for NoopBackend {
                 kind: None,
             }],
             basic_blocks: vec![],
+            roots: request.roots.clone(),
             backend_version: Some("noop-1.0".into()),
             backend_path: None,
         })

@@ -87,6 +87,7 @@ impl AnalysisBackend for GhidraBackend {
             call_edges: vec![CallEdge { from: 0, to: 0, is_cross_slice: false }],
             evidence,
             basic_blocks: vec![],
+            roots: request.roots.clone(),
             backend_version: Some(version),
             backend_path: Some(headless.to_string_lossy().to_string()),
         })
