@@ -211,6 +211,8 @@ pub struct AnalysisSummary {
     pub backend_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backend_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_coverage: Option<RootCoverage>,
 }
 
 pub fn analysis_summary(
@@ -234,6 +236,7 @@ pub fn analysis_summary(
             .backend_path
             .clone()
             .or_else(|| run.and_then(|r| r.backend_path.clone())),
+        root_coverage: root_coverage(result),
     }
 }
 
@@ -260,6 +263,65 @@ fn evidence_summary(result: &ritual_core::services::analysis::AnalysisResult) ->
         }
     }
     EvidenceSummary { total: strings + imports + calls + other, strings, imports, calls, other }
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct RootCoverage {
+    pub matched: Vec<String>,
+    pub unmatched: Vec<String>,
+}
+
+fn root_coverage(result: &ritual_core::services::analysis::AnalysisResult) -> Option<RootCoverage> {
+    if result.roots.is_empty() {
+        return None;
+    }
+    if !result.root_hits.is_empty() {
+        let mut matched = Vec::new();
+        let mut unmatched = Vec::new();
+        for root in &result.roots {
+            if let Some(hit) = result.root_hits.iter().find(|h| h.root == *root) {
+                if hit.functions.is_empty() {
+                    unmatched.push(root.clone());
+                } else {
+                    matched.push(root.clone());
+                }
+            } else {
+                unmatched.push(root.clone());
+            }
+        }
+        return Some(RootCoverage { matched, unmatched });
+    }
+    let mut matched = Vec::new();
+    let mut unmatched = Vec::new();
+    for root in &result.roots {
+        if root_matches_functions(root, &result.functions) {
+            matched.push(root.clone());
+        } else {
+            unmatched.push(root.clone());
+        }
+    }
+    Some(RootCoverage { matched, unmatched })
+}
+
+fn root_matches_functions(
+    root: &str,
+    functions: &[ritual_core::services::analysis::FunctionRecord],
+) -> bool {
+    if let Some(addr) = parse_hex_addr(root) {
+        if functions.iter().any(|f| f.address == addr) {
+            return true;
+        }
+    }
+    let lower = root.to_ascii_lowercase();
+    functions.iter().filter_map(|f| f.name.as_ref()).any(|name| name.to_ascii_lowercase() == lower)
+}
+
+fn parse_hex_addr(root: &str) -> Option<u64> {
+    let trimmed = root.trim_start_matches("0x");
+    if trimmed.is_empty() {
+        return None;
+    }
+    u64::from_str_radix(trimmed, 16).ok()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -745,8 +807,16 @@ pub fn list_ritual_runs_command(root: &str, binary_filter: Option<&str>, json: b
         });
         let analysis_display = run.analysis.as_ref().map(|a| {
             format!(
-                " [analysis: funcs={} edges={} bbs={} evidence={} roots={}]",
-                a.functions, a.call_edges, a.basic_blocks, a.evidence, a.roots
+                " [analysis: funcs={} edges={} bbs={} evidence={} roots={}{}]",
+                a.functions,
+                a.call_edges,
+                a.basic_blocks,
+                a.evidence,
+                a.roots,
+                a.root_coverage
+                    .as_ref()
+                    .map(|c| format!(", matched={}", c.matched.len()))
+                    .unwrap_or_default()
             )
         });
         let extras = format!(
@@ -877,6 +947,16 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
         println!("    Evidence: {}", analysis.evidence.len());
         if !analysis.roots.is_empty() {
             println!("    Roots: {:?}", analysis.roots);
+        }
+        if let Some(coverage) = root_coverage(&analysis) {
+            println!(
+                "    Root coverage: matched {} / {}",
+                coverage.matched.len(),
+                coverage.matched.len() + coverage.unmatched.len()
+            );
+            if !coverage.unmatched.is_empty() {
+                println!("    Unmatched roots: {:?}", coverage.unmatched);
+            }
         }
         let mut strings = 0;
         let mut imports = 0;

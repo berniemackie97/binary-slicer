@@ -223,6 +223,12 @@ pub fn project_info_command(root: &str, json: bool) -> Result<()> {
                             breakdown.strings, breakdown.imports, breakdown.calls, breakdown.other
                         ));
                     }
+                    if let Some(coverage) = &a.root_coverage {
+                        detail.push_str(&format!(" matched={}", coverage.matched.len()));
+                        if !coverage.unmatched.is_empty() {
+                            detail.push_str(&format!(" unmatched={}", coverage.unmatched.len()));
+                        }
+                    }
                     detail.push(']');
                     detail
                 })

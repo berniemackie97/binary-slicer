@@ -11,7 +11,7 @@ use crate::db::{BinaryRecord, RitualRunRecord, RitualRunStatus, SliceRecord, Sli
 const MIN_SUPPORTED_SCHEMA_VERSION: i32 = 0;
 
 /// Latest schema version this crate knows about.
-pub const CURRENT_SCHEMA_VERSION: i32 = 8;
+pub const CURRENT_SCHEMA_VERSION: i32 = 9;
 
 /// Error type for project database operations.
 #[derive(Debug, Error)]
@@ -168,6 +168,7 @@ impl ProjectDb {
         tx.execute("DELETE FROM analysis_basic_blocks WHERE run_id = ?1", params![run_id])?;
         tx.execute("DELETE FROM analysis_evidence WHERE run_id = ?1", params![run_id])?;
         tx.execute("DELETE FROM analysis_roots WHERE run_id = ?1", params![run_id])?;
+        tx.execute("DELETE FROM analysis_root_hits WHERE run_id = ?1", params![run_id])?;
 
         {
             let mut stmt = tx.prepare(
@@ -246,6 +247,30 @@ impl ProjectDb {
             )?;
             for (idx, root) in result.roots.iter().enumerate() {
                 stmt.execute(params![run_id, idx as i64, root])?;
+            }
+        }
+
+        {
+            let mut stmt = tx.prepare(
+                r#"
+                INSERT OR REPLACE INTO analysis_root_hits (run_id, root, function_addr, matched)
+                VALUES (?1, ?2, ?3, ?4)
+                "#,
+            )?;
+            if result.root_hits.is_empty() {
+                for root in &result.roots {
+                    stmt.execute(params![run_id, root, Option::<i64>::None, 0])?;
+                }
+            } else {
+                for hit in &result.root_hits {
+                    if hit.functions.is_empty() {
+                        stmt.execute(params![run_id, &hit.root, Option::<i64>::None, 0])?;
+                    } else {
+                        for func in &hit.functions {
+                            stmt.execute(params![run_id, &hit.root, *func as i64, 1])?;
+                        }
+                    }
+                }
             }
         }
 
@@ -407,6 +432,54 @@ impl ProjectDb {
             }
         }
 
+        // Root hits (optional; fallback to empty when not recorded).
+        let mut root_hits: Vec<crate::services::analysis::RootHit> = Vec::new();
+        {
+            let mut stmt = self.conn.prepare(
+                r#"
+                SELECT root, function_addr, matched
+                FROM analysis_root_hits
+                WHERE run_id = ?1
+                "#,
+            )?;
+            let rows = stmt.query_map(params![run_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, i64>(2)? != 0,
+                ))
+            })?;
+            let mut temp: std::collections::HashMap<String, (Vec<u64>, bool)> =
+                std::collections::HashMap::new();
+            for r in rows {
+                let (root, func, matched) = r?;
+                let entry = temp.entry(root).or_insert_with(|| (Vec::new(), false));
+                if let Some(f) = func {
+                    entry.0.push(f as u64);
+                    entry.1 = entry.1 || matched;
+                } else if matched {
+                    entry.1 = true;
+                }
+            }
+            for (root, (functions, matched_flag)) in temp {
+                let functions_sorted = {
+                    let mut f = functions;
+                    f.sort_unstable();
+                    f
+                };
+                if matched_flag || !functions_sorted.is_empty() {
+                    root_hits.push(crate::services::analysis::RootHit {
+                        root,
+                        functions: functions_sorted,
+                    });
+                } else {
+                    root_hits
+                        .push(crate::services::analysis::RootHit { root, functions: Vec::new() });
+                }
+            }
+            root_hits.sort_by(|a, b| a.root.cmp(&b.root));
+        }
+
         let (backend_version, backend_path) = self.conn.query_row(
             "SELECT backend_version, backend_path FROM ritual_runs WHERE id = ?1",
             params![run_id],
@@ -419,6 +492,7 @@ impl ProjectDb {
             evidence,
             basic_blocks,
             roots,
+            root_hits,
             backend_version,
             backend_path,
         }))
@@ -522,6 +596,7 @@ impl ProjectDb {
 /// - 6: add default_binary column to slices (guarded in code)
 /// - 7: add evidence kind column
 /// - 8: add analysis_roots table for persisted roots per run
+/// - 9: add analysis_root_hits table for per-root matches
 fn apply_migrations(conn: &Connection) -> DbResult<()> {
     let mut current_version = current_schema_version(conn)?;
 
@@ -687,6 +762,23 @@ fn apply_migrations(conn: &Connection) -> DbResult<()> {
                 PRIMARY KEY(run_id, idx)
             );
             PRAGMA user_version = 8;
+            COMMIT;
+            "#,
+        )?;
+        current_version = 8;
+    }
+
+    if current_version < 9 {
+        conn.execute_batch(
+            r#"
+            BEGIN;
+            CREATE TABLE IF NOT EXISTS analysis_root_hits (
+                run_id INTEGER NOT NULL,
+                root   TEXT NOT NULL,
+                function_addr INTEGER,
+                matched INTEGER NOT NULL DEFAULT 0
+            );
+            PRAGMA user_version = 9;
             COMMIT;
             "#,
         )?;

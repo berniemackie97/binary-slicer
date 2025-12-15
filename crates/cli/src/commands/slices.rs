@@ -203,6 +203,10 @@ pub fn emit_slice_docs_command(root: &str) -> Result<()> {
             .or_else(|| latest_run.and_then(|r| r.backend_path.clone()));
         let mapping =
             analysis.as_ref().map(|a| map_evidence_to_functions(&a.functions, &a.evidence));
+        let root_coverage = analysis
+            .as_ref()
+            .map(|a| compute_root_coverage(&roots, &a.functions, &a.root_hits))
+            .unwrap_or_default();
         let summary = analysis.as_ref().map(|a| summarize_analysis(a, roots.len()));
 
         if let Some(run) = latest_run {
@@ -237,6 +241,15 @@ pub fn emit_slice_docs_command(root: &str) -> Result<()> {
                 summary.evidence.calls,
                 summary.evidence.other
             ));
+            contents.push_str(&format!(
+                "- Roots matched: {}/{}",
+                root_coverage.matched.len(),
+                root_coverage.matched.len() + root_coverage.unmatched.len()
+            ));
+            if !root_coverage.unmatched.is_empty() {
+                contents.push_str(&format!(" (unmatched: {})", root_coverage.unmatched.join(", ")));
+            }
+            contents.push_str("\n\n");
         }
 
         if latest_run.is_some() {
@@ -245,7 +258,9 @@ pub fn emit_slice_docs_command(root: &str) -> Result<()> {
                 contents.push_str("- (no roots recorded)\n\n");
             } else {
                 for r in &roots {
-                    contents.push_str(&format!("- {}\n", r));
+                    let matched =
+                        if root_coverage.matched.contains(r) { "matched" } else { "unmatched" };
+                    contents.push_str(&format!("- {} ({})\n", r, matched));
                 }
                 contents.push('\n');
             }
@@ -426,6 +441,10 @@ pub fn emit_slice_reports_command(root: &str, preferred_binary: Option<&str>) ->
         let categorized = analysis.as_ref().map(|a| categorize_evidence(&a.evidence));
         let mapping =
             analysis.as_ref().map(|a| map_evidence_to_functions(&a.functions, &a.evidence));
+        let root_coverage = analysis
+            .as_ref()
+            .map(|a| compute_root_coverage(&roots, &a.functions, &a.root_hits))
+            .unwrap_or_default();
         let summary = analysis.as_ref().map(|a| summarize_analysis(a, roots.len()));
         let function_evidence = analysis
             .as_ref()
@@ -450,6 +469,7 @@ pub fn emit_slice_reports_command(root: &str, preferred_binary: Option<&str>) ->
             "backend_path": backend_path,
             "analysis_summary": summary,
             "function_evidence": function_evidence,
+            "root_coverage": root_coverage,
         });
         let serialized = serde_json::to_string_pretty(&report)?;
         fs::write(&report_path, serialized).with_context(|| {
@@ -643,6 +663,12 @@ struct AnalysisSummary {
     evidence: EvidenceCounts,
 }
 
+#[derive(Clone, Debug, Default, Serialize)]
+struct RootCoverage {
+    matched: Vec<String>,
+    unmatched: Vec<String>,
+}
+
 fn categorize_evidence(
     evidence: &[ritual_core::services::analysis::EvidenceRecord],
 ) -> EvidenceBuckets {
@@ -684,6 +710,61 @@ fn summarize_analysis(analysis: &AnalysisResult, roots: usize) -> AnalysisSummar
         roots,
         evidence: evidence.as_counts(),
     }
+}
+
+fn compute_root_coverage(
+    roots: &[String],
+    functions: &[ritual_core::services::analysis::FunctionRecord],
+    hits: &[ritual_core::services::analysis::RootHit],
+) -> RootCoverage {
+    if !hits.is_empty() {
+        let mut matched = Vec::new();
+        let mut unmatched = Vec::new();
+        for root in roots {
+            if let Some(hit) = hits.iter().find(|h| h.root == *root) {
+                if hit.functions.is_empty() {
+                    unmatched.push(root.clone());
+                } else {
+                    matched.push(root.clone());
+                }
+            } else {
+                unmatched.push(root.clone());
+            }
+        }
+        return RootCoverage { matched, unmatched };
+    }
+
+    let mut matched = Vec::new();
+    let mut unmatched = Vec::new();
+    for root in roots {
+        if root_matches_functions(root, functions) {
+            matched.push(root.clone());
+        } else {
+            unmatched.push(root.clone());
+        }
+    }
+    RootCoverage { matched, unmatched }
+}
+
+fn root_matches_functions(
+    root: &str,
+    functions: &[ritual_core::services::analysis::FunctionRecord],
+) -> bool {
+    if let Some(addr) = parse_hex_addr(root) {
+        if functions.iter().any(|f| f.address == addr) {
+            return true;
+        }
+    }
+    let lower = root.to_ascii_lowercase();
+    functions.iter().filter_map(|f| f.name.as_ref()).any(|name| name.to_ascii_lowercase() == lower)
+}
+
+fn parse_hex_addr(root: &str) -> Option<u64> {
+    let trimmed = root.trim_start_matches("0x");
+    if trimmed.is_empty() {
+        return None;
+    }
+    u64::from_str_radix(trimmed, 16).ok()
 }
 
 fn map_evidence_to_functions(

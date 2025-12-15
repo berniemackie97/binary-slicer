@@ -497,6 +497,14 @@ impl AnalysisBackend for CapstoneBackend {
                 evidence: vec![],
                 basic_blocks: vec![],
                 roots: request.roots.clone(),
+                root_hits: request
+                    .roots
+                    .iter()
+                    .map(|r| crate::services::analysis::RootHit {
+                        root: r.clone(),
+                        functions: Vec::new(),
+                    })
+                    .collect(),
                 backend_version,
                 backend_path: None,
             });
@@ -771,12 +779,14 @@ impl AnalysisBackend for CapstoneBackend {
                 .collect();
         }
 
+        let root_hits = crate::services::analysis::build_root_hits(&request.roots, &functions);
         Ok(AnalysisResult {
             functions,
             call_edges,
             evidence,
             basic_blocks,
             roots: request.roots.clone(),
+            root_hits,
             backend_version,
             backend_path: None,
         })

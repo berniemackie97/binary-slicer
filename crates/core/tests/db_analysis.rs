@@ -43,6 +43,16 @@ fn analysis_result_is_persisted_with_run() {
             successors: vec![BlockEdge { target: 0x1004, kind: BlockEdgeKind::Fallthrough }],
         }],
         roots: vec!["root_a".into(), "root_b".into()],
+        root_hits: vec![
+            ritual_core::services::analysis::RootHit {
+                root: "root_a".into(),
+                functions: vec![0x1000],
+            },
+            ritual_core::services::analysis::RootHit {
+                root: "root_b".into(),
+                functions: Vec::new(),
+            },
+        ],
         backend_version: Some("1.0".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };
@@ -139,6 +149,10 @@ fn insert_analysis_result_overwrites_existing_rows() {
             successors: vec![BlockEdge { target: 0x2, kind: BlockEdgeKind::Jump }],
         }],
         roots: vec!["root1".into()],
+        root_hits: vec![ritual_core::services::analysis::RootHit {
+            root: "root1".into(),
+            functions: vec![0x1],
+        }],
         backend_version: None,
         backend_path: None,
     };
@@ -164,6 +178,16 @@ fn insert_analysis_result_overwrites_existing_rows() {
             successors: vec![BlockEdge { target: 0x20, kind: BlockEdgeKind::Fallthrough }],
         }],
         roots: vec!["root2".into(), "root3".into()],
+        root_hits: vec![
+            ritual_core::services::analysis::RootHit {
+                root: "root2".into(),
+                functions: vec![0x10],
+            },
+            ritual_core::services::analysis::RootHit {
+                root: "root3".into(),
+                functions: Vec::new(),
+            },
+        ],
         backend_version: None,
         backend_path: None,
     };

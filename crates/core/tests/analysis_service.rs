@@ -32,6 +32,20 @@ impl AnalysisBackend for NoopBackend {
             }],
             basic_blocks: vec![],
             roots: request.roots.clone(),
+            root_hits: ritual_core::services::analysis::build_root_hits(
+                &request.roots,
+                &request
+                    .roots
+                    .iter()
+                    .map(|r| FunctionRecord {
+                        address: 0,
+                        name: Some(r.clone()),
+                        size: None,
+                        in_slice: true,
+                        is_boundary: false,
+                    })
+                    .collect::<Vec<_>>(),
+            ),
             backend_version: Some("noop-1.0".into()),
             backend_path: None,
         })

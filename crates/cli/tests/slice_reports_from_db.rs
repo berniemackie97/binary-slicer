@@ -4,7 +4,7 @@ use binary_slicer::commands::{
 use ritual_core::db::{ProjectDb, ProjectLayout, RitualRunRecord, RitualRunStatus};
 use ritual_core::services::analysis::{
     AnalysisResult, BasicBlock, BlockEdge, BlockEdgeKind, CallEdge, EvidenceKind, EvidenceRecord,
-    FunctionRecord,
+    FunctionRecord, RootHit,
 };
 use serde_json::Value;
 use tempfile::tempdir;
@@ -53,6 +53,7 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
             kind: Some(EvidenceKind::Import),
         }],
         roots: vec!["root_a".into()],
+        root_hits: vec![RootHit { root: "root_a".into(), functions: vec![0x1000] }],
         backend_version: Some("rz-1.0".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };
@@ -92,6 +93,10 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
             kind: Some(EvidenceKind::Import),
         }],
         roots: vec!["root_a".into(), "root_b".into()],
+        root_hits: vec![
+            RootHit { root: "root_a".into(), functions: vec![0x2000] },
+            RootHit { root: "root_b".into(), functions: Vec::new() },
+        ],
         backend_version: Some("rz-2.0".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };
@@ -131,6 +136,7 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
             kind: Some(EvidenceKind::Call),
         }],
         roots: vec!["root_b".into()],
+        root_hits: vec![RootHit { root: "root_b".into(), functions: vec![0x4000] }],
         backend_version: Some("rz-2.1".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };
@@ -166,6 +172,9 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
         .as_object()
         .expect("function evidence missing");
     assert_eq!(func_ev["evidence"].as_array().unwrap().len(), 1);
+    let root_cov = report["root_coverage"].as_object().expect("root coverage missing");
+    assert_eq!(root_cov["matched"].as_array().unwrap().len(), 1);
+    assert_eq!(root_cov["unmatched"].as_array().unwrap().len(), 1);
     assert!(!report["call_edges"].as_array().unwrap().is_empty());
     let graph = std::fs::read_to_string(&graph_path).unwrap();
     assert!(graph.contains("NewerFunc") || graph.contains("0x2000"));
@@ -182,6 +191,10 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
         .as_object()
         .expect("function evidence missing for override");
     assert_eq!(func_ev_override["evidence"].as_array().unwrap().len(), 1);
+    let root_cov_override =
+        report_override["root_coverage"].as_object().expect("root coverage missing for override");
+    assert_eq!(root_cov_override["matched"].as_array().unwrap().len(), 1);
+    assert_eq!(root_cov_override["unmatched"].as_array().unwrap().len(), 0);
 
     // Docs should include evidence/functions from the chosen run.
     emit_slice_docs_command(&root).unwrap();
@@ -189,6 +202,7 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
     assert!(doc_body.contains("BinA")); // default binary printed
     assert!(doc_body.contains("NewerFunc")); // uses default binary (BinA) run by default
     assert!(doc_body.contains("Summary")); // summary section surfaced
+    assert!(doc_body.contains("Roots matched")); // root coverage surfaced
     assert!(doc_body.contains("Evidence")); // evidence section populated
     assert!(doc_body.contains("Backend:** rizin"));
 }

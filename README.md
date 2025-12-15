@@ -131,10 +131,10 @@ Slice docs live at `docs/slices/<Name>.md` and are meant to be edited by humans 
 - `ghidra-backend`: registers a Ghidra headless stub (requires `GHIDRA_ANALYZE_HEADLESS` pointing to `analyzeHeadless` or `GHIDRA_INSTALL_DIR`); Ghidra version is recorded as evidence.
 - `setup-backend` can record tool paths in `.ritual/project.json` (and set `default_backend`), optionally append the tool directory to your shell profile PATH (`--write-path`), and best-effort detect the tool version to store alongside the path. It never installs software silently.
 - Recorded backend paths are preferred when running rituals and are captured in run metadata as `backend_path` (and `backend_version` when available).
-- Analysis roots from runs are now persisted in the DB (schema v8) so slice docs/reports can be regenerated without relying on on-disk specs; migrations run automatically when you open the DB.
+- Analysis roots from runs are now persisted in the DB (schema v9) so slice docs/reports can be regenerated without relying on on-disk specs; migrations run automatically when you open the DB.
 - Evidence/roots summaries now show up in `list-ritual-runs` and JSON summaries so you can quickly see analysis coverage without opening each run.
-- Slice docs/reports/graphs now include backend provenance, high-level analysis summaries (functions/calls/basic blocks/evidence/roots), and per-function evidence groupings (strings/imports/calls/other) with unmapped evidence called out separately.
-- DB schema upgrades are automatic on open; if you open an older DB, it will migrate to the latest (currently v8: roots + evidence kinds, run overwrites clear stale rows). Keep backups if you depend on older schema versions.
+- Slice docs/reports/graphs now include backend provenance, high-level analysis summaries (functions/calls/basic blocks/evidence/roots), per-root coverage (matched vs unmatched), and per-function evidence groupings (strings/imports/calls/other) with unmapped evidence called out separately. Run/list/project summaries include root coverage too.
+- DB schema upgrades are automatic on open; if you open an older DB, it will migrate to the latest (currently v9: roots + evidence kinds + root hits, run overwrites clear stale rows). Keep backups if you depend on older schema versions.
 - JSON snapshots (`project-info --json`, `list-ritual-runs --json`) include an `analysis` summary per run with evidence breakdown (strings/imports/calls/other), roots count, and backend provenance.
 
 ## Project layout

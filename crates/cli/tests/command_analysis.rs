@@ -3,6 +3,7 @@ use binary_slicer::commands::init_project_command;
 use ritual_core::db::{ProjectDb, ProjectLayout, RitualRunRecord, RitualRunStatus};
 use ritual_core::services::analysis::{
     AnalysisResult, BasicBlock, BlockEdge, BlockEdgeKind, CallEdge, EvidenceRecord, FunctionRecord,
+    RootHit,
 };
 use serde_json::{self, Value};
 use tempfile::tempdir;
@@ -51,6 +52,7 @@ fn show_ritual_run_json_includes_persisted_analysis_counts() {
             kind: None,
         }],
         roots: vec!["entry_point".into()],
+        root_hits: vec![RootHit { root: "entry_point".into(), functions: vec![0x1000] }],
         backend_version: Some("rz-1.0".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };
@@ -84,6 +86,7 @@ fn show_ritual_run_json_includes_persisted_analysis_counts() {
     assert_eq!(analysis_json["call_edges"].as_array().unwrap().len(), 1);
     assert_eq!(analysis_json["basic_blocks"].as_array().unwrap().len(), 1);
     assert_eq!(analysis_json["evidence"].as_array().unwrap().len(), 1);
+    assert!(analysis_json["roots"].as_array().unwrap().contains(&serde_json::json!("entry_point")));
 }
 
 #[test]
@@ -141,6 +144,7 @@ fn project_info_json_includes_analysis_summary() {
             kind: None,
         }],
         roots: vec!["entry_point".into()],
+        root_hits: vec![RootHit { root: "entry_point".into(), functions: vec![0x2000] }],
         backend_version: Some("rz-1.0".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };
@@ -171,6 +175,9 @@ fn project_info_json_includes_analysis_summary() {
     assert_eq!(summary["roots"].as_u64().unwrap(), 1);
     assert_eq!(summary["evidence_breakdown"]["total"].as_u64().unwrap(), 1);
     assert_eq!(summary["backend_path"], "/usr/bin/rizin");
+    let root_cov = summary["root_coverage"].as_object().expect("root coverage missing");
+    assert_eq!(root_cov["matched"].as_array().unwrap().len(), 1);
+    assert_eq!(root_cov["unmatched"].as_array().unwrap().len(), 0);
 }
 
 #[test]
@@ -210,6 +217,7 @@ fn list_ritual_runs_json_includes_analysis_summary() {
         }],
         evidence: vec![EvidenceRecord { address: 0x3000, description: "list".into(), kind: None }],
         roots: vec!["entry_point".into()],
+        root_hits: vec![RootHit { root: "entry_point".into(), functions: vec![0x3000] }],
         backend_version: Some("rz-1.0".into()),
         backend_path: Some("/usr/bin/rizin".into()),
     };
@@ -234,4 +242,7 @@ fn list_ritual_runs_json_includes_analysis_summary() {
     assert_eq!(analysis_json["roots"].as_u64().unwrap(), 1);
     assert_eq!(analysis_json["evidence_breakdown"]["total"].as_u64().unwrap(), 1);
     assert_eq!(analysis_json["backend_path"], "/usr/bin/rizin");
+    let root_cov = analysis_json["root_coverage"].as_object().expect("root coverage missing");
+    assert_eq!(root_cov["matched"].as_array().unwrap().len(), 1);
+    assert_eq!(root_cov["unmatched"].as_array().unwrap().len(), 0);
 }

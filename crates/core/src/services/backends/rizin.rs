@@ -83,6 +83,7 @@ impl AnalysisBackend for RizinBackend {
             evidence,
             basic_blocks,
             roots: request.roots.clone(),
+            root_hits: crate::services::analysis::build_root_hits(&request.roots, &functions),
             backend_version: Some(version),
             backend_path: Some(rizin_path.display().to_string()),
         })

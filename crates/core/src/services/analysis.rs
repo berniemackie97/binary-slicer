@@ -78,6 +78,8 @@ pub struct AnalysisResult {
     pub evidence: Vec<EvidenceRecord>,
     pub basic_blocks: Vec<BasicBlock>,
     pub roots: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub root_hits: Vec<RootHit>,
     pub backend_version: Option<String>,
     pub backend_path: Option<String>,
 }
@@ -115,6 +117,14 @@ pub struct AnalysisRequest {
     pub options: AnalysisOptions,
     /// Optional explicit backend tool path (e.g., configured rizin/ghidra path).
     pub backend_path: Option<PathBuf>,
+}
+
+/// Mapping of a ritual root to the function(s) it matched in the backend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RootHit {
+    pub root: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub functions: Vec<u64>,
 }
 
 #[derive(Debug, Error)]
@@ -228,6 +238,11 @@ impl AnalysisBackend for ValidateOnlyBackend {
             evidence: vec![],
             basic_blocks: vec![],
             roots: request.roots.clone(),
+            root_hits: request
+                .roots
+                .iter()
+                .map(|r| RootHit { root: r.clone(), functions: Vec::new() })
+                .collect(),
             backend_version: Some("validate-only".into()),
             backend_path: None,
         })
@@ -255,4 +270,37 @@ pub fn default_backend_registry() -> BackendRegistry {
         registry.register(crate::services::backends::GhidraBackend);
     }
     registry
+}
+
+/// Utility to map roots to functions by exact name or hex address (0x-prefixed).
+pub fn build_root_hits(roots: &[String], functions: &[FunctionRecord]) -> Vec<RootHit> {
+    roots
+        .iter()
+        .map(|root| {
+            let addr_match = parse_hex_addr(root);
+            let mut matches = Vec::new();
+            for f in functions {
+                if let Some(addr) = addr_match {
+                    if f.address == addr {
+                        matches.push(f.address);
+                        continue;
+                    }
+                }
+                if let Some(name) = &f.name {
+                    if name == root {
+                        matches.push(f.address);
+                    }
+                }
+            }
+            RootHit { root: root.clone(), functions: matches }
+        })
+        .collect()
+}
+
+fn parse_hex_addr(root: &str) -> Option<u64> {
+    let trimmed = root.trim_start_matches("0x");
+    if trimmed.is_empty() {
+        return None;
+    }
+    u64::from_str_radix(trimmed, 16).ok()
 }
