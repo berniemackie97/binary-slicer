@@ -260,7 +260,12 @@ pub fn emit_slice_docs_command(root: &str) -> Result<()> {
                 for r in &roots {
                     let matched =
                         if root_coverage.matched.contains(r) { "matched" } else { "unmatched" };
-                    contents.push_str(&format!("- {} ({})\n", r, matched));
+                    let hit_label = analysis.as_ref().and_then(|a| format_root_hit(r, a));
+                    if let Some(label) = hit_label {
+                        contents.push_str(&format!("- {} ({} -> {})\n", r, matched, label));
+                    } else {
+                        contents.push_str(&format!("- {} ({})\n", r, matched));
+                    }
                 }
                 contents.push('\n');
             }
@@ -455,6 +460,7 @@ pub fn emit_slice_reports_command(root: &str, preferred_binary: Option<&str>) ->
             "description": slice.description,
             "status": format!("{:?}", slice.status),
             "roots": roots,
+            "root_hits": analysis.as_ref().map(|a| a.root_hits.clone()).unwrap_or_default(),
             "functions": functions,
             "call_edges": call_edges,
             "basic_blocks": basic_blocks,
@@ -802,6 +808,28 @@ fn find_function_for_evidence(
         }
     }
     best.map(|(a, _)| a)
+}
+
+fn format_root_hit(root: &str, analysis: &AnalysisResult) -> Option<String> {
+    let hit = analysis.root_hits.iter().find(|h| h.root == root)?;
+    if hit.functions.is_empty() {
+        return None;
+    }
+    let labels: Vec<String> =
+        hit.functions.iter().map(|addr| function_label(*addr, &analysis.functions)).collect();
+    Some(labels.join(", "))
+}
+
+fn function_label(
+    addr: u64,
+    functions: &[ritual_core::services::analysis::FunctionRecord],
+) -> String {
+    if let Some(f) = functions.iter().find(|f| f.address == addr) {
+        if let Some(name) = &f.name {
+            return format!("{} (0x{:X})", name, addr);
+        }
+    }
+    format!("0x{:X}", addr)
 }
 
 fn write_evidence_section(

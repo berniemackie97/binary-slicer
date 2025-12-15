@@ -213,6 +213,8 @@ pub struct AnalysisSummary {
     pub backend_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_coverage: Option<RootCoverage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_hits: Option<Vec<ritual_core::services::analysis::RootHit>>,
 }
 
 pub fn analysis_summary(
@@ -237,6 +239,7 @@ pub fn analysis_summary(
             .clone()
             .or_else(|| run.and_then(|r| r.backend_path.clone())),
         root_coverage: root_coverage(result),
+        root_hits: (!result.root_hits.is_empty()).then(|| result.root_hits.clone()),
     }
 }
 
@@ -956,6 +959,18 @@ pub fn show_ritual_run_command(root: &str, binary: &str, ritual: &str, json: boo
             );
             if !coverage.unmatched.is_empty() {
                 println!("    Unmatched roots: {:?}", coverage.unmatched);
+            }
+        }
+        if !analysis.root_hits.is_empty() {
+            println!("    Root hits:");
+            for hit in &analysis.root_hits {
+                if hit.functions.is_empty() {
+                    println!("      {} -> (no matched functions)", hit.root);
+                } else {
+                    let labels: Vec<String> =
+                        hit.functions.iter().map(|addr| format!("0x{addr:X}")).collect();
+                    println!("      {} -> [{}]", hit.root, labels.join(", "));
+                }
             }
         }
         let mut strings = 0;

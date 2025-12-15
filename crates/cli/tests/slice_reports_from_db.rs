@@ -175,6 +175,8 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
     let root_cov = report["root_coverage"].as_object().expect("root coverage missing");
     assert_eq!(root_cov["matched"].as_array().unwrap().len(), 1);
     assert_eq!(root_cov["unmatched"].as_array().unwrap().len(), 1);
+    let root_hits = report["root_hits"].as_array().expect("root hits missing");
+    assert_eq!(root_hits.len(), 2);
     assert!(!report["call_edges"].as_array().unwrap().is_empty());
     let graph = std::fs::read_to_string(&graph_path).unwrap();
     assert!(graph.contains("NewerFunc") || graph.contains("0x2000"));
@@ -195,6 +197,9 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
         report_override["root_coverage"].as_object().expect("root coverage missing for override");
     assert_eq!(root_cov_override["matched"].as_array().unwrap().len(), 1);
     assert_eq!(root_cov_override["unmatched"].as_array().unwrap().len(), 0);
+    let root_hits_override =
+        report_override["root_hits"].as_array().expect("root hits missing for override");
+    assert_eq!(root_hits_override.len(), 1);
 
     // Docs should include evidence/functions from the chosen run.
     emit_slice_docs_command(&root).unwrap();

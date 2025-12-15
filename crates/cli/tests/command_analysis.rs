@@ -178,6 +178,8 @@ fn project_info_json_includes_analysis_summary() {
     let root_cov = summary["root_coverage"].as_object().expect("root coverage missing");
     assert_eq!(root_cov["matched"].as_array().unwrap().len(), 1);
     assert_eq!(root_cov["unmatched"].as_array().unwrap().len(), 0);
+    let root_hits = summary["root_hits"].as_array().expect("root hits missing");
+    assert_eq!(root_hits.len(), 1);
 }
 
 #[test]
@@ -245,4 +247,6 @@ fn list_ritual_runs_json_includes_analysis_summary() {
     let root_cov = analysis_json["root_coverage"].as_object().expect("root coverage missing");
     assert_eq!(root_cov["matched"].as_array().unwrap().len(), 1);
     assert_eq!(root_cov["unmatched"].as_array().unwrap().len(), 0);
+    let root_hits = analysis_json["root_hits"].as_array().expect("root hits missing");
+    assert_eq!(root_hits.len(), 1);
 }
