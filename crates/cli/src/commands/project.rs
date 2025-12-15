@@ -207,17 +207,30 @@ pub fn project_info_command(root: &str, json: bool) -> Result<()> {
             let status = run.status.clone().unwrap_or_else(|| "(unknown)".into());
             let backend = run.backend.as_deref().unwrap_or("(unknown)");
             let version = run.backend_version.as_deref().unwrap_or("(unknown)");
-            if let Some(path) = &run.backend_path {
-                println!(
-                    "- {} / {} [{}] backend: {} {} @ {}",
-                    run.binary, run.name, status, backend, version, path
-                );
-            } else {
-                println!(
-                    "- {} / {} [{}] backend: {} {}",
-                    run.binary, run.name, status, backend, version
-                );
-            }
+            let path_str =
+                run.backend_path.as_deref().map(|p| format!(" @ {}", p)).unwrap_or_default();
+            let analysis_str = run
+                .analysis
+                .as_ref()
+                .map(|a| {
+                    let mut detail = format!(
+                        " [analysis: funcs={} edges={} bbs={} evidence={} roots={}",
+                        a.functions, a.call_edges, a.basic_blocks, a.evidence, a.roots
+                    );
+                    if let Some(breakdown) = &a.evidence_breakdown {
+                        detail.push_str(&format!(
+                            " (strings={} imports={} calls={} other={})",
+                            breakdown.strings, breakdown.imports, breakdown.calls, breakdown.other
+                        ));
+                    }
+                    detail.push(']');
+                    detail
+                })
+                .unwrap_or_default();
+            println!(
+                "- {} / {} [{}] backend: {} {}{}{}",
+                run.binary, run.name, status, backend, version, path_str, analysis_str
+            );
         }
     }
     if !slices.is_empty() {

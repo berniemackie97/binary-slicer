@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::fs;
 
 use crate::canonicalize_or_current;
 use anyhow::{Context, Result};
 use ritual_core::db::{RitualRunRecord, SliceRecord};
 use ritual_core::services::analysis::{AnalysisResult, BlockEdgeKind, EvidenceKind};
+use serde::Serialize;
 use serde_json;
 use serde_yaml;
 use std::path::Path;
@@ -185,28 +187,59 @@ pub fn emit_slice_docs_command(root: &str) -> Result<()> {
         let analysis = latest_run
             .and_then(|run| db.load_analysis_result(&run.binary, &run.ritual).ok())
             .flatten();
+        let roots = analysis
+            .as_ref()
+            .map(|a| a.roots.clone())
+            .filter(|r| !r.is_empty())
+            .or_else(|| latest_run.map(|run| load_roots_for_run(&layout, run)))
+            .unwrap_or_default();
+        let backend_version = analysis
+            .as_ref()
+            .and_then(|a| a.backend_version.clone())
+            .or_else(|| latest_run.and_then(|r| r.backend_version.clone()));
+        let backend_path = analysis
+            .as_ref()
+            .and_then(|a| a.backend_path.clone())
+            .or_else(|| latest_run.and_then(|r| r.backend_path.clone()));
+        let mapping =
+            analysis.as_ref().map(|a| map_evidence_to_functions(&a.functions, &a.evidence));
+        let summary = analysis.as_ref().map(|a| summarize_analysis(a, roots.len()));
+
         if let Some(run) = latest_run {
-            let roots = analysis
-                .as_ref()
-                .map(|a| a.roots.clone())
-                .filter(|r| !r.is_empty())
-                .unwrap_or_else(|| load_roots_for_run(&layout, run));
-            let backend_version = analysis
-                .as_ref()
-                .and_then(|a| a.backend_version.clone())
-                .or(run.backend_version.clone());
-            let backend_path =
-                analysis.as_ref().and_then(|a| a.backend_path.clone()).or(run.backend_path.clone());
             contents.push_str("**Backend:** ");
             contents.push_str(&run.backend);
-            if let Some(v) = backend_version {
+            if let Some(v) = &backend_version {
                 contents.push_str(&format!(" {}", v));
             }
-            if let Some(p) = backend_path {
+            if let Some(p) = &backend_path {
                 contents.push_str(&format!(" @ {}", p));
             }
             contents.push_str("\n\n");
+        }
 
+        if let Some(summary) = &summary {
+            contents.push_str("## Summary\n");
+            contents.push_str(&format!(
+                "- Functions: {} (in-slice={}, boundary={})\n",
+                summary.functions, summary.functions_in_slice, summary.boundary_functions
+            ));
+            contents.push_str(&format!(
+                "- Call edges: {} (cross-slice={})\n",
+                summary.call_edges, summary.cross_slice_calls
+            ));
+            contents.push_str(&format!("- Basic blocks: {}\n", summary.basic_blocks));
+            contents.push_str(&format!("- Roots: {}\n", summary.roots));
+            contents.push_str(&format!(
+                "- Evidence: total={} strings={} imports={} calls={} other={}\n\n",
+                summary.evidence.total,
+                summary.evidence.strings,
+                summary.evidence.imports,
+                summary.evidence.calls,
+                summary.evidence.other
+            ));
+        }
+
+        if latest_run.is_some() {
             contents.push_str("## Roots\n");
             if roots.is_empty() {
                 contents.push_str("- (no roots recorded)\n\n");
@@ -228,9 +261,42 @@ pub fn emit_slice_docs_command(root: &str) -> Result<()> {
             } else {
                 for f in &a.functions {
                     let label = f.name.clone().unwrap_or_else(|| format!("0x{:X}", f.address));
-                    contents.push_str(&format!("- {} @ 0x{:X}\n", label, f.address));
+                    let mut tags = Vec::new();
+                    if let Some(size) = f.size {
+                        tags.push(format!("size={}", size));
+                    }
+                    if f.in_slice {
+                        tags.push("in-slice".into());
+                    }
+                    if f.is_boundary {
+                        tags.push("boundary".into());
+                    }
+                    let func_evidence = mapping
+                        .as_ref()
+                        .and_then(|m| m.by_function.get(&f.address))
+                        .cloned()
+                        .unwrap_or_default();
+                    let func_buckets = categorize_evidence(&func_evidence);
+                    contents.push_str(&format!("- {} @ 0x{:X}", label, f.address));
+                    if !tags.is_empty() {
+                        contents.push_str(&format!(" ({})", tags.join(", ")));
+                    }
+                    if func_buckets.total() > 0 {
+                        contents.push_str(&format!(
+                            " — evidence: total={} strings={} imports={} calls={} other={}",
+                            func_buckets.total(),
+                            func_buckets.strings.len(),
+                            func_buckets.imports.len(),
+                            func_buckets.calls.len(),
+                            func_buckets.other.len()
+                        ));
+                    }
+                    contents.push('\n');
+                    if !func_evidence.is_empty() {
+                        write_inline_evidence(&mut contents, &func_evidence, 5);
+                        contents.push('\n');
+                    }
                 }
-                contents.push('\n');
             }
         } else {
             contents.push_str("- TODO: populated by analysis runs.\n\n");
@@ -242,28 +308,26 @@ pub fn emit_slice_docs_command(root: &str) -> Result<()> {
                 contents.push_str("- (no evidence recorded)\n");
             } else {
                 let categorized = categorize_evidence(&a.evidence);
-                if !categorized.strings.is_empty() {
-                    contents.push_str("### Strings\n");
-                    for e in &categorized.strings {
-                        contents.push_str(&format!("- 0x{:X}: {}\n", e.address, e.description));
-                    }
-                }
-                if !categorized.imports.is_empty() {
-                    contents.push_str("### Imports\n");
-                    for e in &categorized.imports {
-                        contents.push_str(&format!("- 0x{:X}: {}\n", e.address, e.description));
-                    }
-                }
-                if !categorized.calls.is_empty() {
-                    contents.push_str("### Calls\n");
-                    for e in &categorized.calls {
-                        contents.push_str(&format!("- 0x{:X}: {}\n", e.address, e.description));
-                    }
-                }
-                if !categorized.other.is_empty() {
-                    contents.push_str("### Other evidence\n");
-                    for e in &categorized.other {
-                        contents.push_str(&format!("- 0x{:X}: {}\n", e.address, e.description));
+                contents.push_str(&format!(
+                    "- Summary: total={} strings={} imports={} calls={} other={}\n\n",
+                    categorized.total(),
+                    categorized.strings.len(),
+                    categorized.imports.len(),
+                    categorized.calls.len(),
+                    categorized.other.len()
+                ));
+                write_evidence_section(&mut contents, "Strings", &categorized.strings, 15);
+                write_evidence_section(&mut contents, "Imports", &categorized.imports, 15);
+                write_evidence_section(&mut contents, "Calls", &categorized.calls, 15);
+                write_evidence_section(&mut contents, "Other evidence", &categorized.other, 15);
+                if let Some(m) = &mapping {
+                    if !m.unmapped.is_empty() {
+                        write_evidence_section(
+                            &mut contents,
+                            "Unmapped evidence (no matching function)",
+                            &m.unmapped,
+                            15,
+                        );
                     }
                 }
             }
@@ -360,6 +424,12 @@ pub fn emit_slice_reports_command(root: &str, preferred_binary: Option<&str>) ->
             .and_then(|a| a.backend_path.clone())
             .or_else(|| latest_run.and_then(|r| r.backend_path.clone()));
         let categorized = analysis.as_ref().map(|a| categorize_evidence(&a.evidence));
+        let mapping =
+            analysis.as_ref().map(|a| map_evidence_to_functions(&a.functions, &a.evidence));
+        let summary = analysis.as_ref().map(|a| summarize_analysis(a, roots.len()));
+        let function_evidence = analysis
+            .as_ref()
+            .and_then(|a| mapping.as_ref().map(|m| build_function_evidence_json(&a.functions, m)));
 
         let report = serde_json::json!({
             "name": slice.name,
@@ -378,6 +448,8 @@ pub fn emit_slice_reports_command(root: &str, preferred_binary: Option<&str>) ->
             "backend": backend,
             "backend_version": backend_version,
             "backend_path": backend_path,
+            "analysis_summary": summary,
+            "function_evidence": function_evidence,
         });
         let serialized = serde_json::to_string_pretty(&report)?;
         fs::write(&report_path, serialized).with_context(|| {
@@ -526,16 +598,49 @@ struct EvidenceBuckets {
     other: Vec<ritual_core::services::analysis::EvidenceRecord>,
 }
 
+#[derive(Clone, Debug, Default, Serialize)]
+struct EvidenceCounts {
+    total: usize,
+    strings: usize,
+    imports: usize,
+    calls: usize,
+    other: usize,
+}
+
 impl EvidenceBuckets {
+    fn total(&self) -> usize {
+        self.strings.len() + self.imports.len() + self.calls.len() + self.other.len()
+    }
+    fn as_counts(&self) -> EvidenceCounts {
+        EvidenceCounts {
+            total: self.total(),
+            strings: self.strings.len(),
+            imports: self.imports.len(),
+            calls: self.calls.len(),
+            other: self.other.len(),
+        }
+    }
     fn counts(&self) -> serde_json::Value {
         serde_json::json!({
-            "total": self.strings.len() + self.imports.len() + self.calls.len() + self.other.len(),
+            "total": self.total(),
             "strings": self.strings.len(),
             "imports": self.imports.len(),
             "calls": self.calls.len(),
             "other": self.other.len(),
         })
     }
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+struct AnalysisSummary {
+    functions: usize,
+    functions_in_slice: usize,
+    boundary_functions: usize,
+    call_edges: usize,
+    cross_slice_calls: usize,
+    basic_blocks: usize,
+    roots: usize,
+    evidence: EvidenceCounts,
 }
 
 fn categorize_evidence(
@@ -556,4 +661,120 @@ fn categorize_evidence(
         }
     }
     buckets
+}
+
+#[derive(Default)]
+struct EvidenceMapping {
+    by_function: HashMap<u64, Vec<ritual_core::services::analysis::EvidenceRecord>>,
+    unmapped: Vec<ritual_core::services::analysis::EvidenceRecord>,
+}
+
+fn summarize_analysis(analysis: &AnalysisResult, roots: usize) -> AnalysisSummary {
+    let evidence = categorize_evidence(&analysis.evidence);
+    let functions_in_slice = analysis.functions.iter().filter(|f| f.in_slice).count();
+    let boundary_functions = analysis.functions.iter().filter(|f| f.is_boundary).count();
+    let cross_slice_calls = analysis.call_edges.iter().filter(|e| e.is_cross_slice).count();
+    AnalysisSummary {
+        functions: analysis.functions.len(),
+        functions_in_slice,
+        boundary_functions,
+        call_edges: analysis.call_edges.len(),
+        cross_slice_calls,
+        basic_blocks: analysis.basic_blocks.len(),
+        roots,
+        evidence: evidence.as_counts(),
+    }
+}
+
+fn map_evidence_to_functions(
+    functions: &[ritual_core::services::analysis::FunctionRecord],
+    evidence: &[ritual_core::services::analysis::EvidenceRecord],
+) -> EvidenceMapping {
+    let mut mapping = EvidenceMapping::default();
+    for ev in evidence {
+        if let Some(addr) = find_function_for_evidence(functions, ev.address) {
+            mapping.by_function.entry(addr).or_default().push(ev.clone());
+        } else {
+            mapping.unmapped.push(ev.clone());
+        }
+    }
+    mapping
+}
+
+fn find_function_for_evidence(
+    functions: &[ritual_core::services::analysis::FunctionRecord],
+    addr: u64,
+) -> Option<u64> {
+    let mut best: Option<(u64, u64)> = None;
+    for func in functions {
+        if let Some(size) = func.size {
+            let start = func.address;
+            let end = start.saturating_add(size as u64);
+            if addr >= start && addr < end {
+                let span = end.saturating_sub(start);
+                if best.map(|(_, s)| span < s).unwrap_or(true) {
+                    best = Some((func.address, span));
+                }
+            }
+        } else if addr == func.address && best.is_none() {
+            best = Some((func.address, u64::MAX));
+        }
+    }
+    best.map(|(a, _)| a)
+}
+
+fn write_evidence_section(
+    buf: &mut String,
+    heading: &str,
+    items: &[ritual_core::services::analysis::EvidenceRecord],
+    limit: usize,
+) {
+    if items.is_empty() {
+        return;
+    }
+    buf.push_str(&format!("### {}\n", heading));
+    for e in items.iter().take(limit) {
+        buf.push_str(&format!("- 0x{:X}: {}\n", e.address, e.description));
+    }
+    if items.len() > limit {
+        buf.push_str(&format!("- ... ({} more {})\n", items.len() - limit, heading.to_lowercase()));
+    }
+    buf.push('\n');
+}
+
+fn write_inline_evidence(
+    buf: &mut String,
+    items: &[ritual_core::services::analysis::EvidenceRecord],
+    limit: usize,
+) {
+    for e in items.iter().take(limit) {
+        buf.push_str(&format!("  - 0x{:X}: {}\n", e.address, e.description));
+    }
+    if items.len() > limit {
+        buf.push_str(&format!("  - ... ({} more entries)\n", items.len() - limit));
+    }
+}
+
+fn build_function_evidence_json(
+    functions: &[ritual_core::services::analysis::FunctionRecord],
+    mapping: &EvidenceMapping,
+) -> serde_json::Value {
+    let mut by_function = serde_json::Map::new();
+    for func in functions {
+        if let Some(items) = mapping.by_function.get(&func.address) {
+            let counts = categorize_evidence(items);
+            by_function.insert(
+                format!("0x{:X}", func.address),
+                serde_json::json!({
+                    "function": func,
+                    "evidence": items,
+                    "evidence_counts": counts.counts(),
+                }),
+            );
+        }
+    }
+    serde_json::json!({
+        "by_function": serde_json::Value::Object(by_function),
+        "unmapped": mapping.unmapped.clone(),
+    })
 }

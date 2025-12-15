@@ -1014,6 +1014,7 @@ roots: [entry_point]
     assert_eq!(payload["binary"], "ShowBin");
     assert_eq!(payload["ritual"], "ShowRun");
     assert!(payload["metadata"]["spec_hash"].as_str().is_some());
+    assert!(payload["analysis"]["roots"].is_array());
 }
 
 /// `show-ritual-run` should prefer DB metadata when available.

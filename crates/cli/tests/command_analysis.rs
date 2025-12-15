@@ -168,6 +168,8 @@ fn project_info_json_includes_analysis_summary() {
     assert_eq!(summary["call_edges"].as_u64().unwrap(), 1);
     assert_eq!(summary["basic_blocks"].as_u64().unwrap(), 1);
     assert_eq!(summary["evidence"].as_u64().unwrap(), 1);
+    assert_eq!(summary["roots"].as_u64().unwrap(), 1);
+    assert_eq!(summary["evidence_breakdown"]["total"].as_u64().unwrap(), 1);
     assert_eq!(summary["backend_path"], "/usr/bin/rizin");
 }
 
@@ -229,5 +231,7 @@ fn list_ritual_runs_json_includes_analysis_summary() {
     let analysis_json = runs[0].get("analysis").expect("analysis missing");
     assert_eq!(analysis_json["functions"].as_u64().unwrap(), 1);
     assert_eq!(analysis_json["call_edges"].as_u64().unwrap(), 1);
+    assert_eq!(analysis_json["roots"].as_u64().unwrap(), 1);
+    assert_eq!(analysis_json["evidence_breakdown"]["total"].as_u64().unwrap(), 1);
     assert_eq!(analysis_json["backend_path"], "/usr/bin/rizin");
 }

@@ -202,6 +202,9 @@ pub struct AnalysisSummary {
     pub call_edges: usize,
     pub basic_blocks: usize,
     pub evidence: usize,
+    pub roots: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_breakdown: Option<EvidenceSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -214,11 +217,14 @@ pub fn analysis_summary(
     result: &ritual_core::services::analysis::AnalysisResult,
     run: Option<&ritual_core::db::RitualRunRecord>,
 ) -> AnalysisSummary {
+    let evidence_breakdown = Some(evidence_summary(result));
     AnalysisSummary {
         functions: result.functions.len(),
         call_edges: result.call_edges.len(),
         basic_blocks: result.basic_blocks.len(),
         evidence: result.evidence.len(),
+        roots: result.roots.len(),
+        evidence_breakdown,
         backend: run.map(|r| r.backend.clone()),
         backend_version: result
             .backend_version
@@ -229,6 +235,31 @@ pub fn analysis_summary(
             .clone()
             .or_else(|| run.and_then(|r| r.backend_path.clone())),
     }
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct EvidenceSummary {
+    pub total: usize,
+    pub strings: usize,
+    pub imports: usize,
+    pub calls: usize,
+    pub other: usize,
+}
+
+fn evidence_summary(result: &ritual_core::services::analysis::AnalysisResult) -> EvidenceSummary {
+    let mut strings = 0;
+    let mut imports = 0;
+    let mut calls = 0;
+    let mut other = 0;
+    for e in &result.evidence {
+        match e.kind {
+            Some(ritual_core::services::analysis::EvidenceKind::String) => strings += 1,
+            Some(ritual_core::services::analysis::EvidenceKind::Import) => imports += 1,
+            Some(ritual_core::services::analysis::EvidenceKind::Call) => calls += 1,
+            _ => other += 1,
+        }
+    }
+    EvidenceSummary { total: strings + imports + calls + other, strings, imports, calls, other }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -712,13 +743,18 @@ pub fn list_ritual_runs_command(root: &str, binary_filter: Option<&str>, json: b
                 format!(" [backend: {} {}]", b, version)
             }
         });
-        println!(
-            "- {} / {} -> {}{}",
-            run.binary,
-            run.name,
-            run.path,
-            backend_display.unwrap_or_default()
+        let analysis_display = run.analysis.as_ref().map(|a| {
+            format!(
+                " [analysis: funcs={} edges={} bbs={} evidence={} roots={}]",
+                a.functions, a.call_edges, a.basic_blocks, a.evidence, a.roots
+            )
+        });
+        let extras = format!(
+            "{}{}",
+            backend_display.unwrap_or_default(),
+            analysis_display.unwrap_or_default()
         );
+        println!("- {} / {} -> {}{}", run.binary, run.name, run.path, extras);
     }
     Ok(())
 }

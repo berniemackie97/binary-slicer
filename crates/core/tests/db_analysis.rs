@@ -98,3 +98,82 @@ fn analysis_result_is_persisted_with_run() {
         .unwrap();
     assert_eq!(roots_count, 2);
 }
+
+#[test]
+fn insert_analysis_result_overwrites_existing_rows() {
+    let temp = tempfile::tempdir().unwrap();
+    let db_path = temp.path().join("proj.db");
+    let db = ProjectDb::open(&db_path).unwrap();
+
+    let run_record = ritual_core::db::RitualRunRecord {
+        binary: "Bin".into(),
+        ritual: "Run".into(),
+        spec_hash: "spec".into(),
+        binary_hash: None,
+        backend: "rizin".into(),
+        backend_version: None,
+        backend_path: None,
+        status: ritual_core::db::RitualRunStatus::Succeeded,
+        started_at: "now".into(),
+        finished_at: "now".into(),
+    };
+    let run_id = db.insert_ritual_run(&run_record).unwrap();
+
+    let first = AnalysisResult {
+        functions: vec![FunctionRecord {
+            address: 0x1,
+            name: Some("f1".into()),
+            size: None,
+            in_slice: true,
+            is_boundary: false,
+        }],
+        call_edges: vec![CallEdge { from: 0x1, to: 0x2, is_cross_slice: false }],
+        evidence: vec![ritual_core::services::analysis::EvidenceRecord {
+            address: 0x1,
+            description: "first".into(),
+            kind: None,
+        }],
+        basic_blocks: vec![BasicBlock {
+            start: 0x1,
+            len: 4,
+            successors: vec![BlockEdge { target: 0x2, kind: BlockEdgeKind::Jump }],
+        }],
+        roots: vec!["root1".into()],
+        backend_version: None,
+        backend_path: None,
+    };
+    db.insert_analysis_result(run_id, &first).unwrap();
+
+    let second = AnalysisResult {
+        functions: vec![FunctionRecord {
+            address: 0x10,
+            name: Some("f2".into()),
+            size: None,
+            in_slice: true,
+            is_boundary: false,
+        }],
+        call_edges: vec![CallEdge { from: 0x10, to: 0x20, is_cross_slice: false }],
+        evidence: vec![ritual_core::services::analysis::EvidenceRecord {
+            address: 0x10,
+            description: "second".into(),
+            kind: None,
+        }],
+        basic_blocks: vec![BasicBlock {
+            start: 0x10,
+            len: 8,
+            successors: vec![BlockEdge { target: 0x20, kind: BlockEdgeKind::Fallthrough }],
+        }],
+        roots: vec!["root2".into(), "root3".into()],
+        backend_version: None,
+        backend_path: None,
+    };
+    db.insert_analysis_result(run_id, &second).unwrap();
+
+    let loaded = db.load_analysis_result("Bin", "Run").unwrap().expect("analysis result");
+    assert_eq!(loaded.functions.len(), 1);
+    assert_eq!(loaded.functions[0].address, 0x10);
+    assert_eq!(loaded.call_edges.len(), 1);
+    assert_eq!(loaded.evidence.len(), 1);
+    assert_eq!(loaded.basic_blocks.len(), 1);
+    assert_eq!(loaded.roots, vec!["root2".to_string(), "root3".to_string()]);
+}

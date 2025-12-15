@@ -161,6 +161,14 @@ impl ProjectDb {
     ) -> DbResult<()> {
         let tx = self.conn.unchecked_transaction()?;
 
+        // Clear any existing rows for this run to avoid stale data on reruns.
+        tx.execute("DELETE FROM analysis_functions WHERE run_id = ?1", params![run_id])?;
+        tx.execute("DELETE FROM analysis_call_edges WHERE run_id = ?1", params![run_id])?;
+        tx.execute("DELETE FROM analysis_basic_block_edges WHERE run_id = ?1", params![run_id])?;
+        tx.execute("DELETE FROM analysis_basic_blocks WHERE run_id = ?1", params![run_id])?;
+        tx.execute("DELETE FROM analysis_evidence WHERE run_id = ?1", params![run_id])?;
+        tx.execute("DELETE FROM analysis_roots WHERE run_id = ?1", params![run_id])?;
+
         {
             let mut stmt = tx.prepare(
                 r#"

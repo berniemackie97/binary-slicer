@@ -158,6 +158,14 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
         e["kind"] == "import"
             || e["description"].as_str().unwrap_or_default().to_lowercase().contains("import")
     }));
+    let summary = report.get("analysis_summary").expect("analysis summary missing");
+    assert_eq!(summary["functions"].as_u64().unwrap(), 1);
+    assert_eq!(summary["call_edges"].as_u64().unwrap(), 1);
+    assert_eq!(summary["evidence"]["total"].as_u64().unwrap(), 1);
+    let func_ev = report["function_evidence"]["by_function"]["0x2000"]
+        .as_object()
+        .expect("function evidence missing");
+    assert_eq!(func_ev["evidence"].as_array().unwrap().len(), 1);
     assert!(!report["call_edges"].as_array().unwrap().is_empty());
     let graph = std::fs::read_to_string(&graph_path).unwrap();
     assert!(graph.contains("NewerFunc") || graph.contains("0x2000"));
@@ -170,12 +178,17 @@ fn emit_slice_reports_and_graphs_use_db_analysis() {
     let funcs_override = report_override["functions"].as_array().unwrap();
     assert_eq!(funcs_override[0]["name"].as_str().unwrap(), "BinBFunc");
     assert_eq!(report_override["backend_version"], "rz-2.1");
+    let func_ev_override = report_override["function_evidence"]["by_function"]["0x4000"]
+        .as_object()
+        .expect("function evidence missing for override");
+    assert_eq!(func_ev_override["evidence"].as_array().unwrap().len(), 1);
 
     // Docs should include evidence/functions from the chosen run.
     emit_slice_docs_command(&root).unwrap();
     let doc_body = std::fs::read_to_string(layout.slices_docs_dir.join("SliceOne.md")).unwrap();
     assert!(doc_body.contains("BinA")); // default binary printed
     assert!(doc_body.contains("NewerFunc")); // uses default binary (BinA) run by default
+    assert!(doc_body.contains("Summary")); // summary section surfaced
     assert!(doc_body.contains("Evidence")); // evidence section populated
     assert!(doc_body.contains("Backend:** rizin"));
 }
