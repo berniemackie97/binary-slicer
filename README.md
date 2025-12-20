@@ -1,6 +1,7 @@
 # Binary Slicer (Slice-Oriented Reverse-Engineering Assistant)
 
 [![CI](https://github.com/berniemackie97/binary-slicer/actions/workflows/ci.yml/badge.svg)](https://github.com/berniemackie97/binary-slicer/actions/workflows/ci.yml)
+[![wakatime](https://wakatime.com/badge/user/dd1b4aee-71e4-41d0-a2d8-e1b2a0865b30/project/0a4ed15f-ccc7-4a8b-a75e-5737a3c53e55.svg)](https://wakatime.com/badge/user/dd1b4aee-71e4-41d0-a2d8-e1b2a0865b30/project/0a4ed15f-ccc7-4a8b-a75e-5737a3c53e55)
 
 Binary Slicer is a Rust toolkit for **slice-oriented reverse engineering** of native game/engine binaries (e.g., `libExampleGame.so`). It helps you carve a large binary into **subsystems ("slices")** with explicit evidence and repeatable workflows.
 
